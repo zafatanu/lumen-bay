@@ -1,134 +1,113 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
-import { stageShot } from './shots.js';
+// LUMEN BAY — main bootstrap: fixed-step loop, screens, chase camera,
+// ferris wheel spin, clock advance, resize, and the ?shot= staging hook.
+import * as THREE from 'three';
+import { STEP, SEED, CAMERA } from './config.js';
+import { createRandom, seedFromString } from './random.js';
+import { createInput } from './input.js';
+import { createState } from './state.js';
+import { createCity } from './city/city.js';
+import { createRenderer3D } from './render/scene.js';
 
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
-
+// --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+const seedParam = params.get('seed');
+const rng = createRandom(seedParam ? seedFromString(seedParam) : SEED);
 
-const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
+function boot() {
+  const canvas = document.getElementById('world3d');
+  const input = createInput();
+  const state = createState();
+  const renderer = createRenderer3D(canvas);
+  const { scene, camera, update, resize } = renderer;
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
+  // Build the island once; the whole city is deterministic from the seed.
+  const city = createCity(scene, rng);
+  const spawn = city.spawnPoints[0];
+
+  // --- Screens: title shows until the player starts; Esc pauses; M maps. ---
+  let screen = 'title';
+  function show(next) {
+    screen = next;
   }
-}
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
-  }
-}
+  // --- Chase camera: an orbit view around the spawn that glides in. ---
+  const camPivot = new THREE.Vector3(spawn.x, 0, spawn.z);
+  let camGlide = 0;
+  let camAngle = 0.6;
 
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
-}
-
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
+  // --- Fixed-step 1/60 loop with an accumulated remainder. ---
   let accumulator = 0;
   let last = performance.now();
 
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
-  }
-
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
-  }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
+  // One-shot key presses drive the screen flow.
+  function handleScreens() {
+    if (input.pressed('Enter') || input.pressed('Space')) {
+      if (screen === 'title') show('play');
+      else if (screen === 'paused') show('play');
     }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
-  }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
+    if (input.pressed('Escape')) {
+      show(screen === 'play' ? 'paused' : 'play');
     }
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
-      return;
+    if (input.pressed('KeyM')) {
+      show(screen === 'map' ? 'play' : 'map');
     }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
+    const frameTime = Math.min((now - last) / 1000, 0.1);
     last = now;
-    handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
+    accumulator += frameTime;
+
+    handleScreens();
+    input.clear();
+
+    while (accumulator >= STEP) {
+      step(STEP);
+      accumulator -= STEP;
     }
-    renderer.draw(world.state, screen, best);
+
+    // Scene render + HUD clock refresh happen once per display frame.
+    update(STEP, state.clockMinutes);
+    const hudClock = document.getElementById('clock');
+    if (hudClock) hudClock.textContent = state.formatClock();
   }
 
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    }
-  });
+  function step(dt) {
+    // Clock always advances, even over the title — the day rolls on.
+    state.advanceClock(dt);
 
-  announce('Block Dodger. Press Space or click to start.');
+    // Ferris wheel spins slowly whenever it exists.
+    if (city.wheel && city.wheel.userData.spin) {
+      city.wheel.userData.spin.rotation.z += dt * 0.08;
+    }
+
+    // Chase camera: glide in then drift in a slow lazy orbit.
+    camGlide = Math.min(1, camGlide + dt * CAMERA.glide);
+    camAngle += dt * CAMERA.orbitSpeed;
+    const dist = CAMERA.distStart + camGlide * CAMERA.distMax;
+    camera.position.set(
+      camPivot.x + Math.cos(camAngle) * dist,
+      CAMERA.heightStart + camGlide * CAMERA.heightMax,
+      camPivot.z + Math.sin(camAngle) * dist
+    );
+    camera.lookAt(camPivot.x, CAMERA.lookHeight, camPivot.z);
+  }
+
+  // --- Resize. ---
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- ?shot= staging hook: render the city from the chase viewpoint once,
+  //     then signal the harness that a frame is ready to capture. ---
+  if (params.has('shot')) {
+    // Advance the camera to its resting pose and draw a single frame.
+    for (let i = 0; i < 10; i += 1) step(STEP);
+    update(STEP, state.clockMinutes);
+    requestAnimationFrame(() => { window.__shotReady = true; });
+  }
+
   requestAnimationFrame(frame);
 }
 
-if (shot) runShot(shot);
-else runGame();
+boot();
