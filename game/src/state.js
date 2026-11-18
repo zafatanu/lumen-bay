@@ -22,6 +22,12 @@ export function createState() {
     escapes: 0,
     takedowns: 0,
     playSeconds: 0,
+    inCar: false,
+    currentCar: null,
+    driftScore: 0,
+    nearMissCount: 0,
+    speedKmh: 0,
+    popups: [],
   });
 
   const state = fresh();
@@ -40,6 +46,16 @@ export function createState() {
       const raw = window.localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       Object.assign(state, fresh(), JSON.parse(raw));
+      // Coerce saved fields back to numbers: an old or hand-edited save must
+      // not poison the sim with string arithmetic.
+      const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
+        'carsStolen', 'escapes', 'takedowns', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
+      for (const k of numeric) {
+        const v = Number(state[k]);
+        if (Number.isFinite(v)) state[k] = v;
+        else state[k] = 0;
+      }
+      if (typeof state.inCar !== 'boolean') state.inCar = false;
       return true;
     } catch {
       return false;
@@ -84,5 +100,25 @@ export function createState() {
     return `${state.day}/${DAY.days} ${formatClock()} · $${state.money} · ${state.repName} · ${state.stars}★`;
   }
 
-  return { state, save, load, reset, advanceClock, addXp, formatClock, summary };
+  /** Queue a short-lived on-screen popup; the HUD drains them over time. */
+  function pushPopup(text) {
+    state.popups.push({ text, t: 3.0 });
+  }
+
+  /** Raise wanted stars directly (e.g. stealing a car); clamps to the cap. */
+  function addStars(n) {
+    state.stars = Math.max(0, Math.min(POLICE.stars.length, state.stars + n));
+  }
+
+  /** Record a traffic near-miss for the HUD stat; call from the driver's frame. */
+  function noteNearMiss() {
+    state.nearMissCount += 1;
+  }
+
+  /** True while the current car is driveable; the HUD reads this to warn the player. */
+  function carCondition() {
+    return state.currentCar ? state.currentCar.condition : 0;
+  }
+
+  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition };
 }
