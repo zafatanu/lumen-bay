@@ -2,6 +2,7 @@
 // follow camera and building collision for walking.
 import * as THREE from 'three';
 import { WORLD, PLAYER } from '../config.js';
+import { buildGunMesh } from '../combat/weapons.js';
 
 function roadLine(i) {
   const west = -WORLD.total / 2;
@@ -93,6 +94,21 @@ export function createOnFoot(state, city, scene) {
   scene.add(mesh);
   const pos = new THREE.Vector3();
   let heading = 0;
+  // The gun lives in the right hand; it is rebuilt only when the weapon changes.
+  let gun = null;
+  let gunFor = null;
+  const GUN_AT = { x: 0.42, y: 1.05, z: 0.22 };
+  function setWeapon(id) {
+    if (id === gunFor) return;
+    gunFor = id;
+    if (gun) { mesh.remove(gun); gun = null; }
+    if (id && id !== 'fists') {
+      gun = buildGunMesh(id);
+      gun.position.set(GUN_AT.x, GUN_AT.y, GUN_AT.z);
+      gun.visible = true;
+      mesh.add(gun);
+    }
+  }
 
   function setPosition(p, h) {
     pos.copy(p); pos.y = 0;
@@ -106,7 +122,7 @@ export function createOnFoot(state, city, scene) {
   function hide() { mesh.visible = false; }
   function show() { mesh.visible = true; }
 
-  function update(dt, input, camera) {
+  function update(dt, input, camera, aimHeading, aiming) {
     // Camera yaw from its forward direction on the XZ plane.
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
@@ -125,6 +141,13 @@ export function createOnFoot(state, city, scene) {
     if (len > 0.001) {
       mx /= len; mz /= len;
       heading = Math.atan2(mx, mz);
+    } else if (aiming && typeof aimHeading === 'number') {
+      // Braced on the trigger: Rook faces where he's pointing, not where he's
+      // walking (he isn't walking) — this keeps the gun aimed at the crosshair.
+      // Ease toward the aim so the gun swings smoothly instead of teleporting.
+      let d = aimHeading - heading;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      heading += d * Math.min(1, dt * 12);
     }
     const speed = input.sprint ? PLAYER.run : PLAYER.walk;
     pos.x += mx * speed * dt;
@@ -134,5 +157,5 @@ export function createOnFoot(state, city, scene) {
     mesh.rotation.y = heading;
   }
 
-  return { mesh, update, setPosition, getPosition, hide, show, get heading() { return heading; } };
+  return { mesh, update, setWeapon, setPosition, getPosition, hide, show, get heading() { return heading; } };
 }

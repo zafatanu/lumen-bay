@@ -21,6 +21,8 @@ export function createState() {
     carsStolen: 0,
     escapes: 0,
     takedowns: 0,
+    wastedCount: 0,
+    down: false,
     playSeconds: 0,
     inCar: false,
     currentCar: null,
@@ -49,13 +51,14 @@ export function createState() {
       // Coerce saved fields back to numbers: an old or hand-edited save must
       // not poison the sim with string arithmetic.
       const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
-        'carsStolen', 'escapes', 'takedowns', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
+        'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
       for (const k of numeric) {
         const v = Number(state[k]);
         if (Number.isFinite(v)) state[k] = v;
         else state[k] = 0;
       }
       if (typeof state.inCar !== 'boolean') state.inCar = false;
+      if (typeof state.down !== 'boolean') state.down = false;
       return true;
     } catch {
       return false;

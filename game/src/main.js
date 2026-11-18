@@ -12,6 +12,9 @@ import { CARS, buildCarMesh } from './vehicles/cars.js';
 import { createDriver } from './vehicles/driving.js';
 import { createTraffic } from './vehicles/traffic.js';
 import { createOnFoot, followCamera } from './player/onfoot.js';
+import { createArsenal } from './combat/weapons.js';
+import { createEnemies } from './combat/enemies.js';
+import { createCombat } from './combat/combat.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -35,6 +38,9 @@ function boot() {
   // Driving physics + on-foot player share the scene and camera.
   const driver = createDriver(state, city, scene);
   const onFoot = createOnFoot(state, city, scene);
+  const arsenal = createArsenal(state);
+  const enemies = createEnemies(scene, city, rng);
+  const crosshairEl = document.getElementById('crosshair');
 
   // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
   const bayRunner = CARS.find((c) => c.name === 'Bay Runner') || CARS[1];
@@ -49,6 +55,36 @@ function boot() {
 
   // Player begins on foot, just beside the parked car.
   onFoot.setPosition(new THREE.Vector3(spawn.x - 5, 0, spawn.z + 3), 0);
+
+  // Combat wires in the on-foot player, the arsenal and the enemies.
+  let downTimer = 0; // seconds to linger on the WASTED screen before respawn
+  const combat = createCombat(scene, state, arsenal, enemies, onFoot, {
+    traffic,
+    crosshair: crosshairEl,
+    onDown: onWasted,
+    onHurt: (dmg) => { state.pushPopup(`HIT −${Math.round(dmg)}`); },
+  });
+
+  // Wasted screen: Rook drops, then respawns at the hospital for $500.
+  function onWasted() {
+    state.wastedCount += 1;
+    downTimer = 1.8;
+    const wasted = document.getElementById('wasted-screen');
+    if (wasted) wasted.style.display = 'grid';
+  }
+  function respawn() {
+    state.down = false;
+    state.health = PLAYER.health;
+    state.armour = PLAYER.armour;
+    state.money = Math.max(0, state.money - 500);
+    state.stars = 0;
+    state.inCar = false;
+    const wasted = document.getElementById('wasted-screen');
+    if (wasted) wasted.style.display = 'none';
+    // Teleport back to the Coral Beach boulevard, away from the trouble.
+    onFoot.setPosition(new THREE.Vector3(spawn.x - 5, 0, spawn.z + 6), 0);
+    onFoot.show();
+  }
 
   // --- Screens: title shows until the player starts; Esc pauses; M maps. ---
   let screen = 'title';
@@ -147,8 +183,13 @@ function boot() {
     }
 
     const snap = input.snapshot();
+    onFoot.setWeapon(arsenal.current.id);
 
-    if (state.inCar) {
+    if (state.down) {
+      // WASTED: linger on the screen, then respawn at the hospital.
+      downTimer -= dt;
+      if (downTimer <= 0) respawn();
+    } else if (state.inCar) {
       driver.update(dt, snap);
       driver.updateCamera(camera, dt);
       const tm = traffic.update(dt, driver.car.position, driver.speedKmh());
@@ -156,10 +197,19 @@ function boot() {
       if (input.consumeAny(['KeyF'])) exitCar();
     } else {
       followCamera(camera, dt, onFoot.getPosition(), onFoot.heading);
-      onFoot.update(dt, snap, camera);
+      onFoot.update(dt, snap, camera, combat.aimYaw, combat.aiming);
       traffic.update(dt, onFoot.getPosition(), 0);
       if (input.consumeAny(['KeyF'])) trySteal();
     }
+
+    // Combat runs every step: ammo/reload, flashes, enemy AI and any hits.
+    combat.update(dt, input, camera);
+  }
+
+  // Expose a mission hook: spawn a named enemy kind at a world point. Extra
+  // options (health, aggressive) pass straight through to the enemy spawner.
+  function spawnEnemyForMission(kind, pos, opts = {}) {
+    return enemies.spawnEnemy(kind, pos, opts);
   }
 
   // --- Resize. ---
@@ -174,6 +224,7 @@ function boot() {
   }
 
   requestAnimationFrame(frame);
+  return { spawnEnemyForMission, state, arsenal, combat, enemies };
 }
 
 boot();

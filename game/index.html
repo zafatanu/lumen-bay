@@ -27,6 +27,26 @@
   .title-box h1 { margin: 0; font-size: 4em; letter-spacing: 0.18em; color: #ffd9a0;
     text-shadow: 0 4px 14px rgba(255,122,106,0.6); }
   .title-box p { margin: 0; font-size: 1.1em; opacity: 0.95; }
+  /* Crosshair: a small cross that follows the mouse while a gun is drawn. */
+  #crosshair {
+    position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px;
+    pointer-events: none; display: none; color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: currentColor; border-radius: 2px;
+  }
+  #crosshair::before { left: 11px; top: 0; width: 2px; height: 24px; }
+  #crosshair::after { top: 11px; left: 0; height: 2px; width: 24px; }
+  /* Wasted screen: full overlay like the pause screen, on player death. */
+  #wasted-screen {
+    position: absolute; inset: 0; place-content: center;
+    text-align: center; gap: 0.5em; pointer-events: none; display: none;
+    background: radial-gradient(ellipse at center, rgba(120,10,10,0.35), rgba(40,0,0,0.8));
+  }
+  #wasted-screen h2 { margin: 0; font-size: 3.5em; letter-spacing: 0.15em; color: #ff5a5a;
+    text-shadow: 0 3px 10px rgba(0,0,0,0.8); }
+  #wasted-screen p { margin: 0; font-size: 1.05em; opacity: 0.95; }
 </style>
 </head>
 <body>
@@ -42,6 +62,11 @@
   <div id="radio" class="fullscreen"></div>
   <div id="dialogue" class="fullscreen"></div>
   <div id="weapons" class="fullscreen"></div>
+  <div id="crosshair" class="fullscreen"></div>
+  <div id="wasted-screen" class="fullscreen">
+    <h2>WASTED</h2>
+    <p>Rook is down. Respawned at the hospital for $500, wanted cleared.</p>
+  </div>
   <div id="controls-footer" class="fullscreen"></div>
   <div id="popups" class="fullscreen"></div>
   <div id="menu" class="fullscreen"></div>
