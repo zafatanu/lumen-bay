@@ -9,9 +9,10 @@ const WORLD_W = WORLD.total; // island span in metres
 
 /** Build the full map screen inside #map-screen. Returns { open, close }.
  *  `player` -> {x,z} current world position for the player marker;
- *  `police` -> optional { units() } provider for live police blips.
+ *  `police` -> optional { units() } provider for live police blips;
+ *  `markers` -> () => job-giver marker list ({pos,label,kind}) from main.js.
  */
-export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null) {
+export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null, markers = () => []) {
   const dom = document.getElementById('map-screen');
   if (!dom) return { open: () => {}, close: () => {} };
 
@@ -152,7 +153,8 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
     ctx.stroke();
   }
 
-  /** Draw the live markers over the island: shells, mission target, police. */
+  /** Draw the live markers over the island: shells, job givers, mission
+   *  target, police. */
   function drawBlips(ctx) {
     // Conch shells the player has NOT yet found: amber dots.
     const found = state.shells || 0;
@@ -160,6 +162,29 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
     for (const s of SHELLS) {
       if (shown >= found) blip(ctx, s.x, s.z, '#ffd9a0', 3.4);
       else shown += 1;
+    }
+    // Job-giver markers: gold diamond + name for the story mission, teal
+    // dots + names for taxi / taco / race — the same colours as the 3D
+    // signs and the minimap blips, so the legend below stays true.
+    for (const mk of markers()) {
+      const p = toPx(mk.pos.x, mk.pos.z);
+      const colour = mk.kind === 'mission' ? '#ffc24a' : '#2ae0c0';
+      if (mk.kind === 'mission') {
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.moveTo(p.px, p.py - 7);
+        ctx.lineTo(p.px + 6, p.py);
+        ctx.lineTo(p.px, p.py + 7);
+        ctx.lineTo(p.px - 6, p.py);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        blip(ctx, mk.pos.x, mk.pos.z, colour, 4);
+      }
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = colour;
+      ctx.fillText(mk.label, p.px, p.py + 16);
     }
     // Mission / side-job target: a yellow diamond.
     const target = state.missionTarget || state.sideJobTarget;
@@ -226,13 +251,12 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
       </div>
       <div class="mp-sec">LEGEND</div>
       <div class="mp-legend">
-        ${legendItem('#2ae0c0', 'Story mission')}
-        ${legendItem('#4a7aff', 'Garage / safehouse')}
-        ${legendItem('#ffd9a0', 'Taxi / taco / race')}
+        ${legendItem('#ffc24a', 'Story mission')}
+        ${legendItem('#2ae0c0', 'Taxi \u00b7 taco \u00b7 race')}
         ${legendItem('#ffd900', 'Objective')}
-        ${legendItem('#ffb37a', 'Conch shell')}
-        ${legendItem('#ff4a4a', 'Police / heli')}
-        ${legendItem('#7dffb0', 'Hospital / respray')}
+        ${legendItem('#ffd9a0', 'Conch shell')}
+        ${legendItem('#4a7aff', 'Police car')}
+        ${legendItem('#ff4a4a', 'Police heli')}
       </div>
     `;
   }

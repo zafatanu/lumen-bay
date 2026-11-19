@@ -1,5 +1,13 @@
 // Keyboard and pointer input for LUMEN BAY.
 // Held keys give movement state; one-shot presses are queued and consumed once.
+//
+// The one true mapping (HUD footer, CONTROLS and HOW TO PLAY all say this):
+//   WASD/arrows move · SHIFT sprint · E interact (start job) · F enter/steal
+//   car (and exit) · SPACE nitro · H handbrake · R reload · N radio · M map ·
+//   ESC pause. E and F are one-shot: main.js consumes them from the pressed
+//   set (consumeAny), so they have no held-state field here. There is no
+//   honk key: the game has no horn path yet (audio lands in P3), so none is
+//   invented. `jump` is the held Space field — driving.js reads it as nitro.
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),
@@ -14,8 +22,8 @@ const DIGIT = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
 export function createInput() {
   const keys = {
     up: false, down: false, left: false, right: false,
-    sprint: false, handbrake: false, interact: false, jump: false,
-    honk: false, recover: false,
+    sprint: false, handbrake: false, jump: false,
+    recover: false,
   };
   const pressed = new Set();
   const mouse = { x: 0, y: 0, down: false, click: false };
@@ -29,10 +37,10 @@ export function createInput() {
     else if (WASD.right.has(code)) keys.right = true;
     else if (code === 'ShiftLeft' || code === 'ShiftRight') keys.sprint = true;
     else if (code === 'KeyH') keys.handbrake = true;
-    else if (code === 'KeyF') keys.interact = true;
-    else if (code === 'Space') keys.jump = true;
-    else if (code === 'KeyE') keys.honk = true;
+    else if (code === 'Space') keys.jump = true;   // held Space = nitro (driving.js)
     else if (code === 'KeyR') keys.recover = true;
+    // E (interact) and F (enter/steal) are one-shot actions: they fall through
+    // to the pressed set below and main.js consumes them with consumeAny().
     if (DIGIT[code]) weapon = DIGIT[code];
 
     // Keep Space from scrolling the page and arrows from nudging focus.
@@ -48,9 +56,7 @@ export function createInput() {
     else if (WASD.right.has(code)) keys.right = false;
     else if (code === 'ShiftLeft' || code === 'ShiftRight') keys.sprint = false;
     else if (code === 'KeyH') keys.handbrake = false;
-    else if (code === 'KeyF') keys.interact = false;
     else if (code === 'Space') keys.jump = false;
-    else if (code === 'KeyE') keys.honk = false;
     else if (code === 'KeyR') keys.recover = false;
   }
 
@@ -80,8 +86,8 @@ export function createInput() {
   // stale "up" can't leave Rook driving into a wall or firing unattended.
   window.addEventListener('blur', () => {
     keys.up = keys.down = keys.left = keys.right = false;
-    keys.sprint = keys.handbrake = keys.interact = keys.jump = false;
-    keys.honk = keys.recover = false;
+    keys.sprint = keys.handbrake = keys.jump = false;
+    keys.recover = false;
     mouse.down = false;
   });
 
@@ -89,8 +95,8 @@ export function createInput() {
     snapshot() {
       return {
         up: keys.up, down: keys.down, left: keys.left, right: keys.right,
-        sprint: keys.sprint, handbrake: keys.handbrake, interact: keys.interact, jump: keys.jump,
-        honk: keys.honk, recover: keys.recover, weapon,
+        sprint: keys.sprint, handbrake: keys.handbrake, jump: keys.jump,
+        recover: keys.recover, weapon,
         mouseX: mouse.x, mouseY: mouse.y, mouseDown: mouse.down,
       };
     },

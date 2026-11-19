@@ -18,6 +18,10 @@ export function createHud(state, dom, opts = {}) {
   const arsenal = opts.arsenal;
   const radio = opts.radio;
   const police = opts.police;
+  // Live job-giver markers from main.js ({pos,label,kind}); empty if absent.
+  const getMarkers = opts.getMarkers || (() => []);
+  // Accumulated display time for the pulsing story-marker blip.
+  let hudTime = 0;
 
   // ---- DOM handles for the static panels ---------------------------------
   const missionTitle = $('[data-hud="mission-title"]');
@@ -139,7 +143,27 @@ export function createHud(state, dom, opts = {}) {
     mmCtx.restore();
   }
 
-  /** Redraw the whole minimap: grid, shells, mission target, police, player. */
+  /** A pulsing gold diamond for the story job-giver, with a faint halo ring
+   *  so it reads as "go here" even at minimap scale. */
+  function storyBlip(x, z) {
+    const { px, py } = toPx(x, z);
+    const r = 3.6 + Math.sin(hudTime * 2.6) * 1.1;
+    mmCtx.strokeStyle = 'rgba(255,194,74,0.5)';
+    mmCtx.lineWidth = 1;
+    mmCtx.beginPath();
+    mmCtx.arc(px, py, r + 2.6, 0, Math.PI * 2);
+    mmCtx.stroke();
+    mmCtx.fillStyle = '#ffc24a';
+    mmCtx.beginPath();
+    mmCtx.moveTo(px, py - r);
+    mmCtx.lineTo(px + r, py);
+    mmCtx.lineTo(px, py + r);
+    mmCtx.lineTo(px - r, py);
+    mmCtx.closePath();
+    mmCtx.fill();
+  }
+
+  /** Redraw the whole minimap: grid, shells, markers, mission target, police, player. */
   function drawMinimap() {
     if (!mmCtx) return;
     const p = player();
@@ -150,6 +174,12 @@ export function createHud(state, dom, opts = {}) {
       const sx = -WORLD_W / 2 + (i * 91) % WORLD_W;
       const sz = -WORLD_W / 2 + (i * 173) % WORLD_W;
       blip(sx, sz, '#ffd9a0');
+    }
+    // Job-giver markers: pulsing gold diamond for the story mission, teal
+    // dots for the taxi / taco / race givers (same colours as the 3D signs).
+    for (const mk of getMarkers()) {
+      if (mk.kind === 'mission') storyBlip(mk.pos.x, mk.pos.z);
+      else blip(mk.pos.x, mk.pos.z, '#2ae0c0');
     }
     // Mission target / side-job target: a yellow diamond.
     const target = state.missionTarget || state.sideJobTarget;
@@ -180,7 +210,7 @@ export function createHud(state, dom, opts = {}) {
     const active = state.currentMission;
     if (!active) {
       if (missionTitle) missionTitle.textContent = '';
-      if (missionObj) missionObj.textContent = 'Free roam \u2014 press E at a sign to start a job.';
+      if (missionObj) missionObj.textContent = 'Free roam \u2014 follow the gold beacon and press E to start a job.';
       if (missionTimer) missionTimer.textContent = '';
       if (missionStage) missionStage.textContent = '';
       if (missionNext) missionNext.textContent = '';
@@ -352,6 +382,7 @@ export function createHud(state, dom, opts = {}) {
   // --hud-panels-3-- marker: all panels defined
 
   function update(dt) {
+    hudTime += dt;
     drawMinimap();
     updateMission();
     updatePolice();
