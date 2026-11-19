@@ -48,6 +48,11 @@ export function createState() {
     nearMissCount: 0,
     speedKmh: 0,
     popups: [],
+    // S7: settings + a derived completion figure. `settings` persists under
+    // lumen-bay-settings and is applied at boot; `timePlayed` mirrors the
+    // running playSeconds so the menu/map can show elapsed time.
+    settings: { volume: 1, music: true, minimap: true, shake: true },
+    timePlayed: 0,
     // S6: the HUD radio widget reads these; main.js refreshes them from the
     // WebAudio synth radio whenever the station or track changes.
     radioStation: 'WAVE 88.1',
@@ -74,12 +79,16 @@ export function createState() {
       // not poison the sim with string arithmetic.
       const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
         'heat', 'bustedCount', 'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles',
-        'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh', 'shells', 'repXp'];
+        'playSeconds', 'timePlayed', 'driftScore', 'nearMissCount', 'speedKmh', 'shells', 'repXp'];
       for (const k of numeric) {
         const v = Number(state[k]);
         if (Number.isFinite(v)) state[k] = v;
         else state[k] = 0;
       }
+      // Settings are an object; merge over the defaults so partial saves keep
+      // whatever the player last chose without clobbering the rest.
+      if (typeof state.settings !== 'object' || state.settings === null) state.settings = {};
+      state.settings = Object.assign({ volume: 1, music: true, minimap: true, shake: true }, state.settings);
       if (typeof state.inCar !== 'boolean') state.inCar = false;
       if (typeof state.down !== 'boolean') state.down = false;
       return true;
@@ -96,6 +105,7 @@ export function createState() {
     // Freeze the clock once the last day ends so the finale can't be skipped past.
     if (state.day >= DAY.days && state.clockMinutes >= DAY.minutesPerDay) return;
     state.playSeconds += realSeconds;
+    state.timePlayed = state.playSeconds;
     state.clockMinutes += realSeconds * DAY.clockSpeed;
     while (state.clockMinutes >= DAY.minutesPerDay) {
       state.clockMinutes -= DAY.minutesPerDay;
@@ -151,5 +161,16 @@ export function createState() {
     state.repXp = (state.repXp || 0) + amount;
   }
 
-  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition, addRepXp };
+  /** Story completion percentage: DONE missions over the 8-chapter catalog.
+   *  Uses the missions list on state; a side-job/taxi run with no missions
+   *  yet returns 0. */
+  function completionPct() {
+    const ms = state.missions || [];
+    if (!ms.length) return 0;
+    let done = 0;
+    for (const mi of ms) if (mi.status === 'DONE') done += 1;
+    return (done / ms.length) * 100;
+  }
+
+  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition, addRepXp, completionPct };
 }
