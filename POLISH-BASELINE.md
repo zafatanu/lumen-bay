@@ -259,3 +259,122 @@ README, and screenshots.
   output, intentionally uncommitted).
 
 Mode note: Hermes one-shot `-z` mode was used for this Pass 0 run.
+
+## 8. Forward context (amendments 16:00-16:04 WIB, 19 Nov 2026)
+
+### 8.1 Target raised
+
+- Minimum TOP 10 (was TOP 15), set by Dzaki at 16:00 WIB.
+- Quality bar: visuals must match the 5 reference images (golden-hour Miami
+  art-deco coastal city, dense HUD, living streets, cover composition). Where
+  a part of the game is far below that bar, it gets REBUILT properly — not
+  patched, not reskinned.
+
+### 8.2 Pass R verdicts (boss inspection of the 4 current screenshots)
+
+- R1 Chase cover — REBUILD. Current frame: flat red sky, brown box buildings,
+  tiny distant car; no police/heli/ocean visible. Rebuild as a low rear
+  three-quarter chase camera, hero car large in frame, cruisers plus heli
+  actually visible in-frame, coastal boulevard with ocean plus skyline,
+  gradient sunset sky.
+- R2 Shootout — REBUILD. Current frame: blocky figure alone on a dark empty
+  floor; no enemies, no environment, no muzzle flash. Rebuild as character
+  presentation, enemies at varied depths, marina/boardwalk setting, muzzle
+  flash plus tracer, warm sunset light.
+- R3 Map rendering — REBUILD. Current map: flat grid with no
+  island/coastline/water/roads. Keep the mission list, career stats and
+  legend panels; rebuild only the map drawing itself into an island with
+  coastline, water, roads, bridges.
+- R4 Hero car plus traffic dressing — REBUILD. Cars read as tiny boxes;
+  rebuild the Neon Comet as a wedge silhouette and add varied traffic
+  shapes/colors.
+- Menu — POLISH only, not rebuild. Structure is good (wordmark, save
+  summary, crew panel); fix HUD bleed-through behind it and dress the
+  background city.
+- HUD — POLISH. Dense and mostly good; fix the clipped minimap label, the
+  four identical PATROL 1 call signs (generic filler — need distinct call
+  signs), placeholder-ish free-roam text, and panels overlapping on
+  menu/map screens.
+
+### 8.3 Pass A note
+
+Treat the showcase districts dressing as a REBUILD, not a patch: art-deco
+pastel facades, vertical fins, awnings, signage on the boulevard and marina,
+so the city stops reading as brown boxes.
+
+### 8.4 Forbidden names (addition)
+
+Add one more forbidden name to the list: the famous Miami boulevard name
+from the other entry, forbidden in LUMEN BAY code, README, and screenshots.
+The literal name is not reproduced in this report. The existing handling in
+sections 4 and 6 stands (forbidden names not reproduced in this report).
+
+### 8.5 New pass order (3-model consensus; supersedes the previous order)
+
+0 baseline → A atmosphere/lighting/world depth → C staging plus hero chase
+→ D living city plus fluid feel → R rebuild (shootout plus map plus car
+dressing) → B HUD/menu/map → E audio → F source-outline judge index →
+G capture plus audit.
+
+Priority and effort split: hero chase 30, lighting-world 25, stiffness-life
+20, shootout plus HUD 15, audio plus map/menu plus micro-VFX 10. If time
+gets tight, cut ornament polish BEFORE cutting living-world behavior.
+
+### 8.6 Constraints per pass (all binding)
+
+- Pass C staging: LIVE staging only. `?stage=chase` sets starting positions,
+  wanted state, mission state, time, camera, through EXISTING interfaces
+  only. Traffic keeps moving, heli rotor spins, lightbar flashes,
+  water/particles stay alive. NEVER spawn fake props, NEVER freeze physics.
+  4 stars only if the frame stays clean (3 stars is fine). Normal game runs
+  unchanged with no query string.
+- Pass A lighting: RESTRAINED golden hour. Palette reference only (zenith
+  `#1a0b2e`, sun glow `#fc913a`). Sun 5-8 degrees off-center, warm key plus
+  violet/cool fill, moderate fog (island density must stay visible),
+  sun-path on water only if cheap, selective emissive. FORBIDDEN: blanket
+  neon, neon roofline trims, neon HUD on four corners.
+- Pass A/R not-boxy: geometry that changes SILHOUETTE plus motion: awnings,
+  balconies, roof equipment, signs, fences, power poles, parked cars,
+  planters, beach wall, palms in uneven clusters, on SCREENSHOT-FACING
+  streets only, not all facades. Vehicles: sloped profile (hood taper,
+  sloped windshield, wheel wells, emissive light bar, spinning wheels),
+  body roll/pitch, tire smoke. Character: lean/recoil pose. Neon tape is
+  FORBIDDEN as the boxy fix.
+- Pass B HUD: ONE font, ONE panel language (dark translucent, thin
+  restrained border). Tight corners: mission top-LEFT, wanted top-CENTER,
+  cash/weapons top-RIGHT, minimap bottom-LEFT, interaction prompt
+  bottom-CENTER, health/armor/speed bottom-RIGHT. No duplicate readouts.
+  This moves wanted stars from top-right to top-center, superseding the
+  earlier 4-corner plan.
+- Missions: 8 shown COMPACT: numbered dossier list, chapter grouping if the
+  story supports it, completion/reward only if it already exists, side jobs
+  clearly separated. NEVER 8 giant cards on the title screen.
+- Pass R shootout: DEPTH LAYERS first, restrained VFX second. Foreground:
+  Rook, weapon, muzzle flash. Midground: enemies, cover, impact.
+  Background: dockside, coastal road, police response. Muzzle flash YES,
+  lightbar glow YES, spotlight if visible; tracer/underglow CONDITIONAL
+  or no.
+- Pass B map: AUTHORED geography: coastline, road hierarchy, districts,
+  landmarks, markers, legend, player position. Blueprint-inspired but
+  readable.
+- Pass E audio: FUNCTIONAL GATE, not a visual pass. Keep and EXPAND the
+  existing synth radio (more stations/songs) plus engine rev, siren,
+  gunshots, impact, UI sounds, sea/city ambience. Verify music plays after
+  user gesture; independent music/SFX controls if supported; NO external
+  audio dependencies; do NOT build a new radio system.
+- Pass G capture: FOUR FRAMES, FOUR TRUTHS: chase equals world reacting;
+  shootout equals combat plus police escalation running; map equals
+  authored island; menu equals progression plus identity.
+- EXECUTION RULES for all passes: bounded edits, ONE module per run; verify
+  playability per module; keep a known-good version per pass; check the
+  diff. Screenshot gate and gameplay gate are SEPARATE. Before final
+  capture, a clean-load playthrough test: drive, mission, combat, wanted,
+  fail/win, restart, menu/map, resume.
+- REMOVAL TEST for every effect (passes C and R): if removing an effect
+  makes the scene clearer without weakening gameplay readability, REMOVE
+  it. Restraint, not max features.
+- RISKS to record: staging that bypasses real systems (fake game behind a
+  pretty screenshot), forbidden by the live-staging rule; polish regression
+  Qwen cannot playtest, the coordinator playtests each big pass; visual
+  overload, restrained by the removal test; context rot from big rewrites,
+  modular structure locked first, one module per prompt.
