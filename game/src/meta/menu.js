@@ -4,6 +4,7 @@
 import { CHARACTERS } from '../missions/catalog.js';
 import { drawPortrait } from '../missions/characters.js';
 import { SAVE_KEY } from '../config.js';
+import * as sfx from '../audio/sfx.js';
 
 const SETTINGS_KEY = 'lumen-bay-settings';
 
@@ -143,6 +144,7 @@ export function createMenu(state, callbacks = {}) {
   dom.addEventListener('keydown', onKey);
 
   const fire = (name) => {
+    sfx.play('click');   // UI tick on every menu activation
     if (name === 'continue' && callbacks.onContinue) callbacks.onContinue();
     else if (name === 'newgame') callbacks.onNewGame();
     else if (name === 'controls') callbacks.onControls();
@@ -156,6 +158,7 @@ export function createMenu(state, callbacks = {}) {
 
   // NEW GAME must confirm if a save already exists.
   dom.querySelector('[data-mb="newgame"]').addEventListener('click', () => {
+    sfx.play('click');   // NEW GAME bypasses fire() for its confirm dialog
     if (hasSave) {
       const ok = window.confirm('This overwrites your current save. Start fresh?');
       if (!ok) return;

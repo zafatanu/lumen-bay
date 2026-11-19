@@ -23,6 +23,7 @@ import { districtPoint, MISSIONS as missionCatalog } from './missions/catalog.js
 import { drawPortrait } from './missions/characters.js';
 import { createHud } from './hud/hud.js';
 import { createRadio } from './audio/radio.js';
+import * as sfx from './audio/sfx.js';
 import { createMenu, loadSettings, saveSettings } from './meta/menu.js';
 import { createMap } from './meta/map.js';
 import { createPause } from './meta/pause.js';
@@ -134,6 +135,7 @@ function boot() {
   function onWasted() {
     state.wastedCount += 1;
     downTimer = 1.8;
+    sfx.stopAll();   // the sim freezes while Rook is down: no engine/siren drone
     if (state.currentMission) mission.fail('WASTED');
     const wasted = document.getElementById('wasted-screen');
     if (wasted) wasted.style.display = 'grid';
@@ -143,6 +145,7 @@ function boot() {
   function onBusted() {
     state.bustedCount += 1;
     downTimer = 2.0;
+    sfx.stopAll();   // sim freezes while busted: no engine/siren drone
     const fine = Math.min(800, state.money);
     state.money = Math.max(0, state.money - fine);
     state.pushPopup(`BUSTED −$${fine}`);
@@ -281,6 +284,7 @@ function boot() {
       state.addRepXp(def.reward.repXp);
       if (!state.completedMissions.includes(def.id)) state.completedMissions.push(def.id);
       state.pushPopup(`MISSION CLEAR +$${def.reward.money} +${def.reward.repXp} XP`);
+      sfx.play('missionClear');
       state.save();
     },
     onFail: (reason) => {
@@ -352,7 +356,9 @@ function boot() {
   function applySettings() {
     const s = state.settings || {};
     const volume = Number.isFinite(s.volume) ? Math.max(0, Math.min(1, s.volume)) : 1;
-    if (radio) radio.setMuted(!s.music || volume <= 0);
+    // Pass the 0..1 volume through (0 when music is off) so the slider
+    // scales the radio instead of hard-muting it.
+    if (radio) radio.setMuted(!s.music ? 0 : volume);
     const mm = document.querySelector('#hud [data-hud="minimap"]');
     if (mm) mm.style.display = s.minimap === false ? 'none' : '';
     state.shakeEnabled = s.shake !== false;
@@ -495,7 +501,7 @@ function boot() {
 
   /** Controls reference text (same bindings as the HUD footer). */
   function controlsText() {
-    return `<div class="sub-body">WASD drive/walk \u00b7 E interact \u00b7 F enter/steal car \u00b7 SPACE nitro \u00b7 H handbrake
+    return `<div class="sub-body">WASD drive/walk \u00b7 E interact \u00b7 F enter/steal car \u00b7 SPACE nitro \u00b7 H handbrake \u00b7 Q horn
       <br>CLICK shoot \u00b7 1-4 weapons \u00b7 R reload \u00b7 N radio \u00b7 M map \u00b7 ESC pause</div>`;
   }
 
@@ -521,6 +527,9 @@ function boot() {
   function setScreen(next) {
     screen = next;
     hideSub();
+    // Leaving play freezes the sim: silence the continuous audio layers so
+    // the engine/siren never drone under the menu, map or pause overlay.
+    if (next !== 'play') sfx.stopAll();
     if (next !== 'menu') { menuClose && menuClose(); menuClose = null; }
     if (next === 'menu') { menuClose && menuClose(); menuRefresh(); }
     else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); }

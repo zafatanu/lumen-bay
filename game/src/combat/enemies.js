@@ -5,6 +5,7 @@
 // Movement and fire are pure data: combat.js and main.js decide the hits.
 // Every enemy walks the same road grid as Rook, so cover reads as fair.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';
 
@@ -295,6 +296,7 @@ export function createEnemies(scene, city, rng) {
           const aimAng = toward + miss;
           const dvec = new THREE.Vector3(Math.sin(aimAng), 0, Math.cos(aimAng));
           shots.push({ origin: o, dir: dvec, damage: e.def.damage, from: e });
+          sfx.play('enemyShot');   // distant return fire, quieter than Rook's
         }
       }
 

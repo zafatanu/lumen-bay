@@ -4,6 +4,7 @@
 // enemies.js. This module resolves hits, renders muzzle flashes and tracers,
 // and applies hurt to both sides.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 
 /** Muzzle height above Rook's feet ("gun at the chest"). */
 const MUZZLE_Y = 1.22;
@@ -238,6 +239,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     }
     state.health = Math.max(0, state.health - rest);
     hurtFlash = 1;
+    sfx.play('impact');   // dull thud for rounds landing on Rook
     if (onHurt) onHurt(rounds);
     if (state.health <= 0 && !state.down) {
       state.down = true;
@@ -334,6 +336,8 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     dir.z += (Math.random() - 0.5) * sp * 2;
     dir.normalize();
     if (shot.muzzle) flashes.muzzle(muzzle, 1.2 + shot.knock * 2);
+    // Per-weapon report: shotgun thumps lower, SMG stays light (sfx.js).
+    sfx.play('gunshot', { weapon: shot.weapon.id });
     aimPitch += (Math.random() - 0.5) * 0.006;
     // Firing a weapon is itself a crime the wanted meter tracks.
     if (wanted) wanted.addHeat(2, 'shoot');

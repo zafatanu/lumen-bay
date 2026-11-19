@@ -1,6 +1,7 @@
 // LUMEN BAY arcade driving: throttle/brake/reverse, speed-sensitive steering,
 // handbrake drift, nitro, fuel, condition, and a chase camera.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD, CAR, CAMERA } from '../config.js';
 import { buildCarMesh, makeGlowTexture } from './cars.js';
 
@@ -196,6 +197,8 @@ export function createDriver(state, city, scene) {
 
   function exitCar() {
     if (!car) return null;
+    sfx.stopEngine();   // engine loop lives only while driving
+    sfx.setSkid(false);
     scene.remove(car);
     clearSmoke();      // no frozen puffs left hanging over the road
     heroCam = false;   // staged framing ends with the staged drive
@@ -209,8 +212,12 @@ export function createDriver(state, city, scene) {
     updateSmoke(dt);
     if (!car) {
       speed = 0;
+      sfx.stopEngine();   // no car, no engine loop
+      sfx.setSkid(false);
       return;
     }
+    // Horn: one-shot from the pressed set (input.snapshot consumes KeyQ).
+    if (input.honk) sfx.play('horn');
     const top = def.topSpeed;
     const accel = def.accel;
 
@@ -260,6 +267,7 @@ export function createDriver(state, city, scene) {
       driftScore *= 1 - dt * 2;
       skid = 0;
     }
+    sfx.setSkid(drifting);   // filtered-noise scrape while the rear slides
 
     // --- Tire smoke: hard launches (wheelspin off the line) and drifts.
     // Capped at ~30 puffs/s and SMOKE_MAX sprites; purely visual. A totaled
@@ -286,6 +294,7 @@ export function createDriver(state, city, scene) {
     if (dmg > 0) {
       condition = Math.max(0, condition - dmg * 10);
       speed *= 0.92;
+      sfx.play('crash', { vol: 0.5 + dmg * 0.5 });   // harder hit, louder thump
     }
 
     car.position.copy(pos);
@@ -325,6 +334,12 @@ export function createDriver(state, city, scene) {
       state.speedKmh = Math.round(speedKmh());
       state.driftScore = driftScore;
     }
+
+    // --- Engine audio: pitch tracks road speed, throttle loads it, nitro
+    // raises it further. The loop lives only while driving (exitCar/pause
+    // call stopEngine); a stalled or totaled car still idles quietly. ---
+    const nitroOn = input.jump && speed > 2 && nitro > 0;
+    sfx.setEngine(speedKmh(), (input.up || input.down) ? 1 : 0, nitroOn);
   }
 
   /** Chase camera: smooth follow behind the car; FOV widens with speed.

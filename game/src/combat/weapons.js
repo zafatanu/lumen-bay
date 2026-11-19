@@ -3,6 +3,7 @@
 // ammo, fire rate and reloading; whether a shot lands is combat.js's call.
 // Slots stay in hotbar order so HUD key 1-4 lines up with arsenal.select().
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 
 /** Weapon definitions, in hotbar order (keys 1-4). */
 export const WEAPONS = [
@@ -157,6 +158,7 @@ export function createArsenal(state) {
     const p = pocket(w);
     if (p.mag >= w.mag || p.reserve <= 0) return false;
     reloadT = w.reloadTime;
+    sfx.play('reload');   // two quick clicks: mag out, mag in
     return true;
   }
 

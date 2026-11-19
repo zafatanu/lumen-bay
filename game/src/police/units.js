@@ -6,6 +6,7 @@
 // copied from any other game. Audio lives in the radio session; here it's
 // purely visual (flashing light bars, a spotlight cone) plus the AI that chases.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';
 import { makeGlowTexture } from '../vehicles/cars.js';
@@ -345,6 +346,9 @@ export function createPolice(scene, city, rng, wanted) {
     blueMat.emissiveIntensity = on ? 0 : 2.2;
     if (redGlow) redGlow.material.opacity = on ? 0.5 : 0.03;
     if (blueGlow) blueGlow.material.opacity = on ? 0.03 : 0.5;
+    // The two-tone siren rides the lead unit's flash phase (units[0]); it
+    // only ever sounds here, inside the wanted-active update path.
+    if (units.length && u === units[0]) sfx.setSiren(on);
   }
 
   /** Feed the HUD a compact roster row (name, distanceM, state). */
@@ -445,6 +449,7 @@ export function createPolice(scene, city, rng, wanted) {
 
   /** Tear down every unit and the heli. */
   function clear() {
+    sfx.setSiren(false);   // heat gone (or teardown): the two-tone stands down
     for (const u of units) scene.remove(u.mesh);
     units.length = 0;
     if (heli) {

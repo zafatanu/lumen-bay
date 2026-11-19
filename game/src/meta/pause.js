@@ -1,6 +1,7 @@
 // LUMEN BAY pause screen (Esc): PAUSED title, RESUME / RESTART MISSION /
 // SETTINGS / QUIT TO MENU buttons, plus a current-objective recap + stats.
 import { MISSIONS } from '../missions/catalog.js';
+import * as sfx from '../audio/sfx.js';
 
 /** Build the pause overlay inside #pause-screen. Returns { open, close }.
  *  callbacks: onResume, onRestart, onSettings, onQuit.
@@ -44,6 +45,7 @@ export function createPause(state, callbacks = {}) {
     // --pause-wire-- marker: wire buttons below
     dom.querySelectorAll('button').forEach((b) => buttons.push(b));
     const fire = (name) => {
+      sfx.play('click');   // UI tick on every pause-button activation
       if (name === 'resume' && callbacks.onResume) callbacks.onResume();
       else if (name === 'restart') callbacks.onRestart();
       else if (name === 'settings') callbacks.onSettings();

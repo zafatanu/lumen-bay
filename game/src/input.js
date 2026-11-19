@@ -3,11 +3,12 @@
 //
 // The one true mapping (HUD footer, CONTROLS and HOW TO PLAY all say this):
 //   WASD/arrows move · SHIFT sprint · E interact (start job) · F enter/steal
-//   car (and exit) · SPACE nitro · H handbrake · R reload · N radio · M map ·
-//   ESC pause. E and F are one-shot: main.js consumes them from the pressed
-//   set (consumeAny), so they have no held-state field here. There is no
-//   honk key: the game has no horn path yet (audio lands in P3), so none is
-//   invented. `jump` is the held Space field — driving.js reads it as nitro.
+//   car (and exit) · SPACE nitro · H handbrake · Q horn · R reload · N radio ·
+//   M map · ESC pause. E and F are one-shot: main.js consumes them from the pressed
+//   set (consumeAny), so they have no held-state field here. Q is the horn
+//   (P3 audio): also one-shot — snapshot() reports it once as `honk` and
+//   consumes the press, so driving.js honks exactly once per key tap.
+//   `jump` is the held Space field — driving.js reads it as nitro.
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),
@@ -93,10 +94,15 @@ export function createInput() {
 
   return {
     snapshot() {
+      // Horn is one-shot: report the KeyQ press once, then consume it so a
+      // fixed-step frame running several sim steps honks exactly once. The
+      // staged snapshots in shots.js carry the same `honk` field (false).
+      const honk = pressed.has('KeyQ');
+      if (honk) pressed.delete('KeyQ');
       return {
         up: keys.up, down: keys.down, left: keys.left, right: keys.right,
         sprint: keys.sprint, handbrake: keys.handbrake, jump: keys.jump,
-        recover: keys.recover, weapon,
+        recover: keys.recover, weapon, honk,
         mouseX: mouse.x, mouseY: mouse.y, mouseDown: mouse.down,
       };
     },
