@@ -3,16 +3,17 @@
 // completes when its condition is met, feeding onStage/onDialogue callbacks
 // so main.js can pay out, spawn enemies, set wanted stars and save. Only one
 // mission runs at a time; starting another cancels the current run cleanly.
-import { MISSIONS, districtPoint } from './catalog.js';
+import { MISSIONS, districtPoint, snapToRoad } from './catalog.js';
 
 const DRIVE_RANGE = 8;   // metres: close enough to "arrive" at a target
 const RACE_CHECK = 10;   // metres: checkpoint radius for a race stage
 
-/** Resolve a stage's target to a concrete {x,z} point. A district name maps
- *  through catalog.districtPoint; a {x,z} object passes through untouched. */
+/** Resolve a stage's target to a concrete {x,z} point on the road grid. A
+ *  district name maps through catalog.districtPoint (already snapped); a
+ *  {x,z} object is snapped here. One snap at the end keeps it idempotent. */
 function stageTarget(stage) {
-  if (typeof stage.target === 'string') return districtPoint(stage.target);
-  return stage.target || null;
+  const pt = (typeof stage.target === 'string') ? districtPoint(stage.target) : (stage.target || null);
+  return pt ? snapToRoad(pt.x, pt.z) : null;
 }
 
 /** Wanted-star control for a stage: set a floor when the stage asks for heat. */

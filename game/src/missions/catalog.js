@@ -3,7 +3,48 @@
 // Districts use the config centres: Coral Beach, Downtown, Old Quarter,
 // Dockside, Marina. Each mission is a stage list the engine walks in order.
 
-import { DISTRICTS } from '../config.js';
+import { DISTRICTS, WORLD } from '../config.js';
+
+/** Reachable road edge offset: road half-width (7) minus the on-foot radius (0.3). */
+const SNAP_EDGE = WORLD.road / 2 - 0.3;
+
+/** Road grid line positions: the west coast, then every block+road pitch. */
+function roadLine(i) {
+  const west = -WORLD.total / 2;
+  return west + i * (WORLD.block + WORLD.road);
+}
+
+/** Nearest road line to a coordinate, with its signed offset. */
+function nearestRoad(v) {
+  let best = Infinity;
+  let bestI = 0;
+  for (let i = 0; i <= WORLD.blocks; i += 1) {
+    const r = roadLine(i);
+    const d = v - r;
+    if (Math.abs(d) < Math.abs(best)) { best = d; bestI = i; }
+  }
+  return { line: roadLine(bestI), d: best };
+}
+
+/**
+ * Snap a world point onto the road grid so the on-foot player and cars can
+ * actually reach it. Mirrors clampToRoads (on-foot radius 0.3): if the point
+ * is already within a road on either axis, keep it; otherwise push the axis
+ * that needs the smaller nudge out to the nearer road edge.
+ * @param {number} x world x
+ * @param {number} z world z
+ * @returns {{x:number, z:number}} snapped {x,z}
+ */
+export function snapToRoad(x, z) {
+  const nx = nearestRoad(x);
+  const nz = nearestRoad(z);
+  if (Math.abs(nx.d) <= SNAP_EDGE) return { x, z };
+  if (Math.abs(nz.d) <= SNAP_EDGE) return { x, z };
+  const xPush = Math.abs(nx.d) - SNAP_EDGE;
+  const zPush = Math.abs(nz.d) - SNAP_EDGE;
+  if (xPush <= zPush) return { x: nx.line + Math.sign(nx.d) * SNAP_EDGE, z };
+  return { x, z: nz.line + Math.sign(nz.d) * SNAP_EDGE };
+}
 
 /** Named cast for the HUD dialogue and portraits. */
 export const CHARACTERS = [
@@ -203,25 +244,25 @@ export const SIDE_JOBS = [
   },
 ];
 
-/** 24 collectible conch shells across the island. */
+/** 24 collectible conch shells across the island, each snapped onto the road grid. */
 export const SHELLS = [
-  { x: -268, z: -230 }, { x: -256, z: -120 }, { x: -262, z: -20 },
-  { x: -258, z: 60 }, { x: -254, z: 150 }, { x: -266, z: 230 },
-  { x: -200, z: -260 }, { x: -140, z: -200 }, { x: -80, z: -240 },
-  { x: -20, z: -180 }, { x: 40, z: -250 }, { x: 100, z: -190 },
-  { x: 160, z: -260 }, { x: 220, z: -200 }, { x: 180, z: -120 },
-  { x: 90, z: -60 }, { x: -30, z: -30 }, { x: -150, z: 20 },
-  { x: -60, z: 90 }, { x: 30, z: 170 }, { x: 130, z: 110 },
-  { x: 220, z: 140 }, { x: 200, z: 210 }, { x: 110, z: 250 },
+  snapToRoad(-268, -230), snapToRoad(-256, -120), snapToRoad(-262, -20),
+  snapToRoad(-258, 60), snapToRoad(-254, 150), snapToRoad(-266, 230),
+  snapToRoad(-200, -260), snapToRoad(-140, -200), snapToRoad(-80, -240),
+  snapToRoad(-20, -180), snapToRoad(40, -250), snapToRoad(100, -190),
+  snapToRoad(160, -260), snapToRoad(220, -200), snapToRoad(180, -120),
+  snapToRoad(90, -60), snapToRoad(-30, -30), snapToRoad(-150, 20),
+  snapToRoad(-60, 90), snapToRoad(30, 170), snapToRoad(130, 110),
+  snapToRoad(220, 140), snapToRoad(200, 210), snapToRoad(110, 250),
 ];
 
 /** Total collectible conch shells, so the HUD can show n/24 from the data. */
 export const SHELL_TOTAL = SHELLS.length;
 
-/** Resolve a district name to its world centre {x,z}. */
+/** Resolve a district name to its world centre snapped onto the road grid. */
 export function districtPoint(name) {
   const d = DISTRICTS.find((e) => e.name === name);
-  return d ? { x: d.centre.x, z: d.centre.z } : { x: 0, z: 0 };
+  return d ? snapToRoad(d.centre.x, d.centre.z) : { x: 0, z: 0 };
 }
 
 /** Look up a story mission by its id, e.g. 'm3'. */

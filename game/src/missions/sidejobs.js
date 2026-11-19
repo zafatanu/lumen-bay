@@ -4,17 +4,18 @@
 // Jobs are repeatable; shells are one-per-run and pay a flat $100 each.
 // Conch shells sit at fixed city spots; walk within 3m to pick one up.
 import * as THREE from 'three';
-import { SHELLS, SIDE_JOBS, SHELL_TOTAL, districtPoint } from './catalog.js';
+import { SHELLS, SIDE_JOBS, SHELL_TOTAL, districtPoint, snapToRoad } from './catalog.js';
 
 const PICKUP_RANGE = 8;   // metres: reach a stop/target
 const SHELL_RANGE = 3;    // metres: reach a conch shell
 const SHELL_AMOUNT = 100; // $ paid per shell
 
-/** Resolve a stop target to a concrete {x,z}: a district name maps through
- *  catalog.districtPoint; a {x,z} object passes through untouched. */
+/** Resolve a stop target to a concrete {x,z} on the road grid: a district name
+ *  maps through catalog.districtPoint (already snapped); a {x,z} object is
+ *  snapped here. One snap at the end keeps it idempotent. */
 function stopPoint(stop) {
-  if (typeof stop.target === 'string') return districtPoint(stop.target);
-  return stop.target || null;
+  const pt = (typeof stop.target === 'string') ? districtPoint(stop.target) : (stop.target || null);
+  return pt ? snapToRoad(pt.x, pt.z) : null;
 }
 
 /** Plain XZ distance between two {x,z} points. */
