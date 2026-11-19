@@ -17,6 +17,10 @@ import { createEnemies } from './combat/enemies.js';
 import { createCombat } from './combat/combat.js';
 import { createWanted } from './police/wanted.js';
 import { createPolice } from './police/units.js';
+import { createMissions } from './missions/missions.js';
+import { createSideJobs } from './missions/sidejobs.js';
+import { districtPoint, MISSIONS as missionCatalog } from './missions/catalog.js';
+import { drawPortrait } from './missions/characters.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -73,10 +77,12 @@ function boot() {
     onHurt: (dmg) => { state.pushPopup(`HIT −${Math.round(dmg)}`); },
   });
 
-  // Wasted screen: Rook drops, then respawns at the hospital for $500.
+  // Wasted screen: Rook drops, then respawns at the hospital for $500. A
+  // running mission fails when Rook goes down.
   function onWasted() {
     state.wastedCount += 1;
     downTimer = 1.8;
+    if (state.currentMission) mission.fail('WASTED');
     const wasted = document.getElementById('wasted-screen');
     if (wasted) wasted.style.display = 'grid';
   }
@@ -88,10 +94,7 @@ function boot() {
     const fine = Math.min(800, state.money);
     state.money = Math.max(0, state.money - fine);
     state.pushPopup(`BUSTED −$${fine}`);
-    if (state.missionId !== null) {
-      state.missionId = null;
-      state.pushPopup('MISSION FAILED');
-    }
+    if (state.currentMission) mission.fail('BUSTED');
     const busted = document.getElementById('busted-screen');
     if (busted) busted.style.display = 'grid';
   }
@@ -110,6 +113,100 @@ function boot() {
     // Teleport back to the Coral Beach boulevard, away from the trouble.
     onFoot.setPosition(new THREE.Vector3(spawn.x - 5, 0, spawn.z + 6), 0);
     onFoot.show();
+  }
+
+  // --- Mission + side-job engine. ---
+  // A floating beacon (light pillar + diamond) marks the current objective.
+  const beacon = new THREE.Group();
+  {
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.16, 16, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd19a, transparent: true, opacity: 0.5 })
+    );
+    pillar.position.y = 8;
+    beacon.add(pillar);
+    const diamond = new THREE.Mesh(
+      new THREE.ConeGeometry(0.7, 1.2, 4),
+      new THREE.MeshBasicMaterial({ color: 0x2ae0c0, transparent: true, opacity: 0.9 })
+    );
+    diamond.rotation.y = Math.PI / 4;
+    diamond.position.y = 17;
+    beacon.add(diamond);
+    beacon.visible = false;
+    scene.add(beacon);
+  }
+
+  // Mission-start markers in the world: Mama Luz in the Old Quarter plus the
+  // three side-job givers. Each is a small flat sign the player walks into
+  // and presses E to start the work.
+  const missionMarkers = [];
+  function addMarker(pos, label, kind, jobId) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2ae0c0, emissive: 0x0f6a5e });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 0.2), mat);
+    sign.position.set(pos.x, 1.1, pos.z);
+    scene.add(sign);
+    missionMarkers.push({ pos, label, kind, jobId, mesh: sign, ring: null });
+  }
+  addMarker(districtPoint('Old Quarter'), 'MAMA LUZ', 'mission', null);
+  addMarker(districtPoint('Downtown'), 'TAXI', 'sidejob', 'taxi');
+  addMarker(districtPoint('Coral Beach'), 'TACO', 'sidejob', 'taco');
+  addMarker(districtPoint('Marina'), 'RACE', 'sidejob', 'race');
+
+  const mission = createMissions(state, city, {
+    onStage: (text) => { state.missionNext = text; },
+    onDialogue: (who, line) => {
+      state.dialogue = { who, line, portrait: drawPortrait(who) };
+    },
+    onComplete: (def) => {
+      state.money += def.reward.money;
+      state.addRepXp(def.reward.repXp);
+      if (!state.completedMissions.includes(def.id)) state.completedMissions.push(def.id);
+      state.pushPopup(`MISSION CLEAR +$${def.reward.money} +${def.reward.repXp} XP`);
+      state.save();
+    },
+    onFail: (reason) => {
+      state.dialogue = {
+        who: 'Mama Luz',
+        line: reason === 'TIME' ? 'You took too long, Rook. Restart when you\u2019re ready.' : 'Not tonight. Try again at the marker.',
+        portrait: drawPortrait('Mama Luz'),
+      };
+    },
+    unlockNext: (def) => {
+      // Unlock the story mission that follows the one just completed.
+      const nextId = nextMissionId(def.id);
+      if (nextId) mission.unlockThrough(nextId);
+    },
+    spawnEnemies: (kind, pos, n) => {
+      const list = [];
+      for (let i = 0; i < n; i += 1) {
+        const off = new THREE.Vector3(pos.x + (i - n / 2) * 3, 0, pos.z + (i % 2) * 3);
+        const e = spawnEnemyForMission(kind, off, {});
+        if (e) list.push(e);
+      }
+      return list;
+    },
+    setWanted: (n) => wanted.setStars(n),
+    clearEnemies: () => enemies.clear(),
+    stars: () => state.stars,
+    addMoney: (n) => { state.money += n; },
+  });
+
+  // Unlock the first story mission; the rest follow as chapters complete.
+  mission.unlockThrough('m1');
+
+  const sideJobs = createSideJobs(state, city, {
+    addMoney: (n) => { state.money += n; },
+    onPopup: (t) => state.pushPopup(t),
+  });
+
+  // Scatter the 24 conch shells across the island.
+  const shells = sideJobs.placeShells(scene);
+
+  // The mission that follows `id` in the catalog order, or null at the last.
+  function nextMissionId(id) {
+    const i = missionCatalog.findIndex((m) => m.id === id);
+    if (i < 0 || i >= missionCatalog.length - 1) return null;
+    return missionCatalog[i + 1].id;
   }
 
   // --- Screens: title shows until the player starts; Esc pauses; M maps. ---
@@ -244,12 +341,53 @@ function boot() {
         driver.car.position.z += res.ram.z * dt * 30;
       }
     }
+
+    // --- Missions + side jobs + collectibles. ---
+    const ppos = state.inCar ? driver.car.position : onFoot.getPosition();
+    if (!state.down) {
+      mission.update(dt, ppos);
+      sideJobs.update(dt, ppos, shells, scene);
+      updateBeacon();
+      if (input.consumeAny(['KeyE'])) tryStartMission();
+    }
   }
 
   // Expose a mission hook: spawn a named enemy kind at a world point. Extra
   // options (health, aggressive) pass straight through to the enemy spawner.
   function spawnEnemyForMission(kind, pos, opts = {}) {
     return enemies.spawnEnemy(kind, pos, opts);
+  }
+
+  // Keep the floating objective beacon on the current mission target.
+  function updateBeacon() {
+    const t = state.missionTarget || state.sideJobTarget;
+    if (!t) { beacon.visible = false; return; }
+    beacon.position.set(t.x, 0, t.z);
+    beacon.visible = true;
+  }
+
+  // Pressing E beside a mission/side-job marker starts that job, if its
+  // story mission is unlocked (story) or its district is ready (side job).
+  function tryStartMission() {
+    const pp = onFoot.getPosition();
+    const reach = PLAYER.reach + 2.5;
+    let nearest = null;
+    for (const mk of missionMarkers) {
+      const d = Math.hypot(mk.pos.x - pp.x, mk.pos.z - pp.z);
+      if (d <= reach && (!nearest || d < nearest.d)) nearest = { mk, d };
+    }
+    if (!nearest) return;
+    const mk = nearest.mk;
+    if (mk.kind === 'mission') {
+      if (state.currentMission) { state.pushPopup('Already on a job.'); return; }
+      // Only the currently-unlocked story mission is startable at the marker.
+      const active = (state.missions || []).find((mi) => mi.status === 'ACTIVE');
+      if (active) mission.start(active.id);
+    } else if (mk.kind === 'sidejob') {
+      if (state.currentMission) { state.pushPopup('Finish the story mission first.'); return; }
+      if (state.sideJob) { state.pushPopup('Already running a side job.'); return; }
+      sideJobs.start(mk.jobId);
+    }
   }
 
   // --- Resize. ---

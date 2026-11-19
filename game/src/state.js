@@ -20,6 +20,20 @@ export function createState() {
     missionId: null,
     missionStage: 0,
     completedMissions: [],
+    // S5: mission engine + dialogue + collectibles live state. `missions` is
+    // the map-screen list; `dialogue` feeds the HUD; target/timer/stage/next
+    // are read each frame by the beacon + HUD.
+    missions: [],
+    currentMission: null,
+    dialogue: null,
+    missionTarget: null,
+    missionTimer: null,
+    missionNext: null,
+    sideJob: null,
+    sideJobTarget: null,
+    sideJobTimer: null,
+    shells: 0,
+    repXp: 0,
     sideJobs: [],
     collectibles: 0,
     carsStolen: 0,
@@ -55,7 +69,8 @@ export function createState() {
       // Coerce saved fields back to numbers: an old or hand-edited save must
       // not poison the sim with string arithmetic.
       const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
-        'heat', 'bustedCount', 'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
+        'heat', 'bustedCount', 'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles',
+        'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh', 'shells', 'repXp'];
       for (const k of numeric) {
         const v = Number(state[k]);
         if (Number.isFinite(v)) state[k] = v;
@@ -127,5 +142,10 @@ export function createState() {
     return state.currentCar ? state.currentCar.condition : 0;
   }
 
-  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition };
+  /** Rank progress: missions and collectibles pay rep XP toward the next rank. */
+  function addRepXp(amount) {
+    state.repXp = (state.repXp || 0) + amount;
+  }
+
+  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition, addRepXp };
 }
