@@ -1,7 +1,29 @@
-// LUMEN BAY render scene: WebGL renderer, sunset lighting, sky dome, clouds,
-// and the shared canvas-texture facade helper used by city.js.
+// LUMEN BAY render scene: WebGL renderer, golden-hour lighting, sky dome,
+// clouds, and the shared canvas-texture facade helper used by city.js.
 import * as THREE from 'three';
 import { SUNSET, WORLD } from '../config.js';
+
+// Golden-hour relight (R2 P1b): every shot reads sun-soaked, not night —
+// pale gold/pink horizon under a pale blue zenith, warm amber key, cool
+// pale-blue fill so shadowed facades stay readable. LIGHT ONLY: the sun
+// bearing stays the verified SUNSET.sunPos geometry, so the sky disc, the
+// key light and the water sun-path in city.js never disagree.
+const GOLDEN = {
+  fog: 0xf3d2b3,        // warm pale haze on the horizon skyline
+  fogNear: 150,         // haze starts past the near streets...
+  fogFar: 880,          // ...and never swallows the island (578m across)
+  skyTop: 0x9cc4e4,     // zenith: pale blue
+  skyMid: 0xf4c3c9,     // pale pink band above the horizon
+  skyLow: 0xffe2a8,     // pale gold horizon
+  sunGlow: 0xffcf7d,    // halo + sun-path colour around the low sun
+  sun: 0xffc98f,        // warm amber key light
+  sunIntensity: 2.6,
+  hemiSky: 0xbdd7f0,    // cool pale-blue sky fill
+  hemiGround: 0xe8c39a, // warm sand bounce off the streets
+  hemiIntensity: 1.25,
+  fill: 0xa9c6e8,       // cool pale-blue bounce on the shadowed facades
+  fillIntensity: 0.9,
+};
 
 /** Darken a '#rrggbb' colour by factor f (0..1) for painted trim/shadows. */
 function shade(hex, f) {
@@ -10,6 +32,18 @@ function shade(hex, f) {
   const g = Math.round(((n >> 8) & 255) * f);
   const b = Math.round((n & 255) * f);
   return `rgb(${r},${g},${b})`;
+}
+
+/** Lift a '#rrggbb' wall colour toward a warm cream pastel (factor f 0..1)
+ *  so the art-deco facades read pink/mint/cream/peach in the golden light.
+ *  District identity stays — this is a tint, not a repaint. */
+function pastel(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c, t) => Math.round(c + (t - c) * f);
+  const r = mix((n >> 16) & 255, 255);
+  const g = mix((n >> 8) & 255, 236);
+  const b = mix(n & 255, 214);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
 // --- Ambient dressing hooks (visual only). ---
@@ -22,7 +56,7 @@ export function registerAmbient(fn) { ambientUpdaters.push(fn); }
 /** Shared helper: paint a building facade (windows grid) onto a canvas texture.
  *  Deterministic: pass the city's seeded rng so the same city reproduces exactly.
  *  deco=true adds art-deco pilasters + floor bands for the showcase districts.
- *  Windows are SELECTIVE: roughly one in five lit warm, the rest dark glass. */
+ *  Windows are SELECTIVE: roughly one in five lit warm, the rest cool glass. */
 export function makeFacadeTexture(palette, floors, rng, deco = false) {
   const w = 256;
   const h = 512;
@@ -30,7 +64,7 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
   cv.width = w;
   cv.height = h;
   const ctx = cv.getContext('2d');
-  const wall = palette[Math.floor(rng() * palette.length)] || palette[0];
+  const wall = pastel(palette[Math.floor(rng() * palette.length)] || palette[0], 0.22);
   ctx.fillStyle = wall;
   ctx.fillRect(0, 0, w, h);
   const cols = 4;
@@ -62,7 +96,8 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
       const x = w * (c + 1) / (cols + 1) - winW / 2;
       const y = h * (r + 1) / (rows + 1) - winH / 2;
       const lit = rng() < lightP;
-      ctx.fillStyle = lit ? (rng() < 0.5 ? '#ffc978' : '#ffe3b0') : 'rgba(24,28,44,0.85)';
+      // Unlit glass reads as sky-reflecting blue at golden hour, not night black.
+      ctx.fillStyle = lit ? (rng() < 0.5 ? '#ffc978' : '#ffe3b0') : 'rgba(70,92,120,0.85)';
       ctx.fillRect(x, y, winW, winH);
       if (y > h * 0.06 && y + winH < h * 0.76) windows.push({ x, y, lit });
       if (deco) {
@@ -105,39 +140,39 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
   return tex;
 }
 
-/** Build renderer, sunset sky dome, lights, fog and clouds. Returns update(). */
+/** Build renderer, golden-hour sky dome, lights, fog and clouds. Returns update(). */
 export function createRenderer3D(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  renderer.setClearColor(SUNSET.fog);
+  renderer.toneMappingExposure = 1.12;   // sun-soaked, a stop up on the old dusk
+  renderer.setClearColor(GOLDEN.fog);
 
   const scene = new THREE.Scene();
-  // Moderate haze: depth cue between the camera and the far districts, but
-  // the island (578m) stays fully readable — no fog-out.
-  scene.fog = new THREE.Fog(SUNSET.fog, SUNSET.fogNear, SUNSET.fogFar);
+  // Warm horizon haze: depth cue between the camera and the far districts,
+  // but the island (578m) stays fully readable — no fog-out.
+  scene.fog = new THREE.Fog(GOLDEN.fog, GOLDEN.fogNear, GOLDEN.fogFar);
 
   const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.5, 1600544);
   camera.position.set(0, 40, 90);
   camera.lookAt(0, 0, 0);
 
-  // --- Sunset sky dome: big sphere with a vertex-colour gradient. ---
-  // The single gradient sphere wraps the whole island, so the same dusk
-  // palette tints every district and no skybox texture ever loads. A cheap
-  // analytic glow + disc puts the low sun on the ocean horizon.
+  // --- Golden-hour sky dome: big sphere with a vertex-colour gradient. ---
+  // The single gradient sphere wraps the whole island, so the same pale
+  // gold/pink palette tints every district and no skybox texture ever loads.
+  // A cheap analytic glow + disc puts the low sun on the ocean horizon.
   const sunDir = new THREE.Vector3(SUNSET.sunPos.x, SUNSET.sunPos.y, SUNSET.sunPos.z).normalize();
   const skyGeo = new THREE.SphereGeometry(1500, 32, 24);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     uniforms: {
-      topColor: { value: new THREE.Color(SUNSET.skyTop) },
-      midColor: { value: new THREE.Color(SUNSET.skyMid) },
-      lowColor: { value: new THREE.Color(SUNSET.skyLow) },
+      topColor: { value: new THREE.Color(GOLDEN.skyTop) },
+      midColor: { value: new THREE.Color(GOLDEN.skyMid) },
+      lowColor: { value: new THREE.Color(GOLDEN.skyLow) },
       sunDir: { value: sunDir },
-      glowColor: { value: new THREE.Color(SUNSET.sunGlow) },
+      glowColor: { value: new THREE.Color(GOLDEN.sunGlow) },
       glowStrength: { value: 1.0 },
     },
     vertexShader: `
@@ -169,9 +204,10 @@ export function createRenderer3D(canvas) {
   const sky = new THREE.Mesh(skyGeo, skyMat);
   scene.add(sky);
 
-  // --- Sunset lighting: warm low key over the ocean + cool violet fill. ---
-  // Sun sits ~7 deg above the horizon, ~6 deg off the ocean centre (config).
-  const sun = new THREE.DirectionalLight(SUNSET.sun, SUNSET.sunIntensity);
+  // --- Golden-hour lighting: warm amber low key over the ocean + cool
+  // pale-blue fill. Sun sits ~7 deg above the horizon (config geometry), so
+  // every shadow stretches long down the streets. ---
+  const sun = new THREE.DirectionalLight(GOLDEN.sun, GOLDEN.sunIntensity);
   sun.position.set(SUNSET.sunPos.x, SUNSET.sunPos.y, SUNSET.sunPos.z);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -182,19 +218,19 @@ export function createRenderer3D(canvas) {
   scene.add(sun);
   scene.add(sun.target);
 
-  const hemi = new THREE.HemisphereLight(SUNSET.hemiSky, SUNSET.hemiGround, 1.0);
+  const hemi = new THREE.HemisphereLight(GOLDEN.hemiSky, GOLDEN.hemiGround, GOLDEN.hemiIntensity);
   scene.add(hemi);
 
-  // Cool blue bounce from the opposite side so shadowed facades read violet,
-  // not black. No shadow map — it is fill only.
-  const fill = new THREE.DirectionalLight(SUNSET.fill, SUNSET.fillIntensity);
+  // Cool pale-blue bounce from the opposite side so shadowed facades read
+  // pastel, not black. No shadow map — it is fill only.
+  const fill = new THREE.DirectionalLight(GOLDEN.fill, GOLDEN.fillIntensity);
   fill.position.set(120, 70, 90);
   scene.add(fill);
   scene.add(fill.target);
 
-  // --- Clouds: a few flat translucent billboards high up, dusk-tinted. ---
+  // --- Clouds: a few flat translucent billboards high up, cream-tinted. ---
   const cloudGroup = new THREE.Group();
-  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffc9a8, transparent: true, opacity: 0.5 });
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xfff0dc, transparent: true, opacity: 0.55 });
   for (let i = 0; i < 10; i += 1) {
     const cw = 60 + Math.random() * 120;
     const cd = 12 + Math.random() * 24;
@@ -209,31 +245,35 @@ export function createRenderer3D(canvas) {
   let time = 0;
   // The ocean plane is built by city.js under this name; grab it once.
   let ocean = null;
+  // The painted ground plane (city.js buildGround) gets one cheap wet-look
+  // material tune below; found once by its unique footprint, then left alone.
+  let road = null;
+  let roadTuned = false;
 
   // Day/night transition: minutes from start (17:40) to midnight toward 06:00.
   // t goes 0 at 17:40 to 1 at 06:00 (next morning) → night creeps in.
-  const sunColor = new THREE.Color(SUNSET.sun);
-  const hemiColor = new THREE.Color(SUNSET.hemiSky);
+  const sunColor = new THREE.Color(GOLDEN.sun);
+  const hemiColor = new THREE.Color(GOLDEN.hemiSky);
 
   function update(dt, clockMinutes) {
     time += dt;
     cloudGroup.position.x = (time * 1.2) % (WORLD.total * 4) - WORLD.total * 2;
 
-    // Blend sunset light toward night as the clock moves past ~20:00.
+    // Blend golden-hour light toward night as the clock moves past ~20:00.
     const minutes = clockMinutes || 17 * 60 + 40;
     const nightT = THREE.MathUtils.clamp((minutes - 20 * 60) / (6 * 60), 0, 1);
     const night = SUNSET.nightSky;
-    const nightIntensity = THREE.MathUtils.lerp(SUNSET.sunIntensity, SUNSET.nightSunIntensity, nightT);
-    sunColor.set(SUNSET.sun).lerp(new THREE.Color(night), nightT);
+    const nightIntensity = THREE.MathUtils.lerp(GOLDEN.sunIntensity, SUNSET.nightSunIntensity, nightT);
+    sunColor.set(GOLDEN.sun).lerp(new THREE.Color(night), nightT);
     sun.intensity = nightIntensity;
     sun.color.copy(sunColor);
-    hemi.intensity = THREE.MathUtils.lerp(1.0, 0.5, nightT);
-    hemiColor.set(SUNSET.hemiSky).lerp(new THREE.Color(night), nightT * 0.6);
+    hemi.intensity = THREE.MathUtils.lerp(GOLDEN.hemiIntensity, 0.5, nightT);
+    hemiColor.set(GOLDEN.hemiSky).lerp(new THREE.Color(night), nightT * 0.6);
     hemi.color.copy(hemiColor);
     // The sun disc/halo and the cool bounce fade with the key light so the
     // night creep stays one continuous identity, not a second palette.
     skyMat.uniforms.glowStrength.value = THREE.MathUtils.lerp(1.0, 0.12, nightT);
-    fill.intensity = THREE.MathUtils.lerp(SUNSET.fillIntensity, 0.22, nightT);
+    fill.intensity = THREE.MathUtils.lerp(GOLDEN.fillIntensity, 0.22, nightT);
 
     // Gentle ocean motion: a slow vertex swell on the ocean plane plus a
     // faint roughness breathe, so the low sun's specular glint shifts like
@@ -250,6 +290,23 @@ export function createRenderer3D(canvas) {
       pos.needsUpdate = true;
       ocean.geometry.computeVertexNormals();
       ocean.material.roughness = 0.15 + Math.sin(time * 0.4) * 0.04;
+    }
+
+    // Wet-look asphalt: one restrained material tune on the painted ground
+    // plane — lower roughness + a touch of metalness lets the low sun lay a
+    // long specular streak down the roads. No env map, no extra render pass.
+    if (!roadTuned) {
+      if (!road) {
+        scene.traverse((o) => {
+          if (!road && o.isMesh && o.material && o.material.map
+            && Math.abs(o.position.y + 0.5) < 0.01 && o.scale.x === WORLD.total) road = o;
+        });
+      }
+      if (road) {
+        road.material.roughness = 0.4;
+        road.material.metalness = 0.15;
+        roadTuned = true;
+      }
     }
 
     // Ambient city dressing (palm sway, lamps, windows, cruiser lightbar).

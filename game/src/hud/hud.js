@@ -33,6 +33,9 @@ export function createHud(state, dom, opts = {}) {
   const repTier = $('[data-hud="rep-tier"]');
   const repFill = $('[data-hud="rep-fill"]');
   const wantedRow = $('[data-hud="wanted-stars"]');
+  const wantedBanner = $('[data-hud="wanted-banner"]');
+  const wantedBannerStars = $('[data-hud="wanted-banner-stars"]');
+  const wantedSight = $('[data-hud="wanted-sight"]');
   const moneyEl = $('[data-hud="money"]');
   const clockEl = $('[data-hud="clock"]');
   const speedoKmh = $('[data-hud="speedo-kmh"]');
@@ -225,14 +228,29 @@ export function createHud(state, dom, opts = {}) {
     }
   }
 
-  /** Top-right: wanted stars, money, day + clock. */
+  /** Top-right: wanted stars, money, day + clock, plus the WANTED banner
+   *  (star count + IN SIGHT chip) that shows whenever wanted >= 1. */
   function updateTopRight() {
+    const max = 5;
+    const lit = Math.max(0, Math.min(max, state.stars));
     if (wantedRow) {
-      const max = 5;
       let stars = '';
-      const lit = Math.max(0, Math.min(max, state.stars));
       for (let i = 0; i < max; i += 1) stars += i < lit ? '\u2605' : '\u2606';
       wantedRow.textContent = stars;
+    }
+    // WANTED banner: reuses the wanted controller's own sighting tracking —
+    // wanted.js resets hideTimer to 0 on every step a unit keeps eyes on Rook
+    // and records lastSeenPos, so hideTimer === 0 with a last-seen record
+    // means "in sight right now". No new state is invented here.
+    if (wantedBanner) {
+      if (lit > 0) {
+        wantedBanner.style.display = 'flex';
+        if (wantedBannerStars) wantedBannerStars.textContent = '\u2605'.repeat(lit);
+        const inSight = !!state.lastSeenPos && state.hideTimer === 0;
+        if (wantedSight) wantedSight.style.display = inSight ? '' : 'none';
+      } else {
+        wantedBanner.style.display = 'none';
+      }
     }
     if (moneyEl) moneyEl.textContent = '$' + Number(state.money).toLocaleString();
     if (clockEl) clockEl.textContent = `Day ${state.day} \u00b7 ${state.formatClock()}`;
