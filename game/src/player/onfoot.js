@@ -83,7 +83,18 @@ export function followCamera(camera, dt, pos, heading) {
   camera.position.x += (cx - camera.position.x) * k;
   camera.position.y += (pos.y + up - camera.position.y) * k;
   camera.position.z += (cz - camera.position.z) * k;
-  camera.lookAt(pos.x, pos.y + 1.0, pos.z);
+  // Ease the look point as well as the position so a quick turn swings the
+  // view instead of whipping it. The target is unchanged (Rook's chest).
+  const tx = pos.x, ty = pos.y + 1.0, tz = pos.z;
+  let look = camera.userData.followLook;
+  if (!look) { look = new THREE.Vector3(tx, ty, tz); camera.userData.followLook = look; }
+  const dx = tx - look.x, dy = ty - look.y, dz = tz - look.z;
+  if (dx * dx + dy * dy + dz * dz > 144) look.set(tx, ty, tz);  // teleport: snap, don't sweep
+  const lk = Math.min(1, dt * 10);
+  look.x += (tx - look.x) * lk;
+  look.y += (ty - look.y) * lk;
+  look.z += (tz - look.z) * lk;
+  camera.lookAt(look.x, look.y, look.z);
   const fovTarget = 55;
   camera.fov += (fovTarget - camera.fov) * Math.min(1, dt * 4);
   camera.updateProjectionMatrix();
@@ -99,9 +110,31 @@ export function createOnFoot(state, city, scene) {
   let gun = null;
   let gunFor = null;
   const GUN_AT = { x: 0.42, y: 1.05, z: 0.22 };
+
+  // --- Visual-only character feel (mesh transforms, never movement or
+  // collision): the body eases to its heading, banks into turns, leans into
+  // acceleration, kicks back on a shot and reels when a round lands. None of
+  // this feeds back into pos, heading, speed or hit detection.
+  let visHeading = 0;      // mesh yaw, eases toward the logical heading
+  let prevVisHeading = 0;  // last mesh yaw, for the turn-rate bank
+  let leanPitch = 0;       // eased forward/back lean (speed + acceleration)
+  let leanRoll = 0;        // eased bank into turns
+  let recoil = 0;          // 1 on a shot, decays fast (torso + gun kick)
+  let flinch = 0;          // 1 when hit, decays (reel back + twist)
+  let prevMoveSpeed = 0;   // commanded speed last step, for the accel lean
+  let lastMag = null;      // magazine last step: a drop means a shot fired
+  let lastHealth = null;   // health/armour last step: a drop means a hit
+  let lastArmour = null;
+  /** Current magazine for a weapon id, or null when there isn't one. */
+  function magOf(id) {
+    const a = state.ammo && id && state.ammo[id];
+    return a ? a.mag : null;
+  }
+
   function setWeapon(id) {
     if (id === gunFor) return;
     gunFor = id;
+    lastMag = magOf(id);   // a weapon switch is not a shot
     if (gun) { mesh.remove(gun); gun = null; }
     if (id && id !== 'fists') {
       gun = buildGunMesh(id);
@@ -115,13 +148,28 @@ export function createOnFoot(state, city, scene) {
     pos.copy(p); pos.y = 0;
     heading = h !== undefined ? h : heading;
     mesh.position.copy(pos);
-    mesh.rotation.y = heading;
+    // Sync the visual layer so a teleport doesn't spin or replay old hits.
+    visHeading = heading;
+    prevVisHeading = heading;
+    leanPitch = leanRoll = recoil = flinch = 0;
+    prevMoveSpeed = 0;
+    lastMag = magOf(gunFor);
+    lastHealth = state.health;
+    lastArmour = state.armour;
+    mesh.rotation.set(0, heading, 0);
+    if (gun) gun.rotation.x = 0;
   }
 
   function getPosition() { return pos.clone(); }
 
   function hide() { mesh.visible = false; }
-  function show() { mesh.visible = true; }
+  function show() {
+    mesh.visible = true;
+    // Back on foot (car exit / respawn): refresh the hit baseline so damage
+    // taken while driving isn't replayed as a flinch now.
+    lastHealth = state.health;
+    lastArmour = state.armour;
+  }
 
   function update(dt, input, camera, aimHeading, aiming) {
     // Camera yaw from its forward direction on the XZ plane.
@@ -155,7 +203,43 @@ export function createOnFoot(state, city, scene) {
     pos.z += mz * speed * dt;
     clampToRoads(pos, 0.3);
     mesh.position.copy(pos);
-    mesh.rotation.y = heading;
+
+    // --- Read-only combat cues: a shot drops the magazine by one and a landed
+    // round drops health or armour. Observing those drops triggers the pose;
+    // ammo, damage and hit detection themselves are never touched here.
+    const mag = magOf(gunFor);
+    if (mag !== null && lastMag !== null && mag < lastMag) recoil = 1;
+    lastMag = mag;
+    const hp = state.health, ar = state.armour;
+    if (lastHealth !== null && (hp < lastHealth || ar < lastArmour)) flinch = 1;
+    lastHealth = hp; lastArmour = ar;
+
+    // --- Visual feel only: mesh transforms below never feed back into pos,
+    // heading, speed or collision.
+    const vdt = Math.min(dt, 0.05);   // keep the eases stable on lag spikes
+    // Facing eases toward the logical heading instead of snapping to it.
+    let dh = heading - visHeading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    visHeading += dh * Math.min(1, vdt * 10);
+    // Bank into the turn from the eased facing rate.
+    let turn = visHeading - prevVisHeading;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    prevVisHeading = visHeading;
+    const rollT = THREE.MathUtils.clamp(-(turn / Math.max(vdt, 1e-4)) * 0.045, -0.16, 0.16);
+    leanRoll += (rollT - leanRoll) * Math.min(1, vdt * 8);
+    // Lean into acceleration and into the run itself.
+    const moveSpeed = len > 0.001 ? speed : 0;
+    const accel = (moveSpeed - prevMoveSpeed) / Math.max(vdt, 1e-4);
+    prevMoveSpeed = moveSpeed;
+    const pitchT = THREE.MathUtils.clamp(moveSpeed * 0.010 + accel * 0.010, -0.16, 0.20);
+    leanPitch += (pitchT - leanPitch) * Math.min(1, vdt * 7);
+    // Decay the shot kick and the hit reel, then compose the pose.
+    recoil = Math.max(0, recoil - vdt * 8);
+    flinch = Math.max(0, flinch - vdt * 5);
+    const pitch = leanPitch - recoil * 0.12 - flinch * 0.20;
+    const roll = leanRoll + flinch * 0.13;
+    mesh.rotation.set(pitch, visHeading, roll);
+    if (gun) gun.rotation.x = -recoil * 0.30;   // muzzle flips up on the shot
   }
 
   return { mesh, update, setWeapon, setPosition, getPosition, hide, show, get heading() { return heading; } };

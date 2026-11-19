@@ -3,8 +3,33 @@
 // ferris wheel. Everything is built procedurally from a seeded rng.
 import * as THREE from 'three';
 import { WORLD, COAST, SEA, DISTRICTS, SPAWN, SUNSET } from '../config.js';
-import { makeFacadeTexture } from '../render/scene.js';
+import { makeFacadeTexture, registerAmbient } from '../render/scene.js';
 import { rand, randInt, pick } from '../random.js';
+
+// Ambient dressing lists: filled during the build, ticked by one updater
+// registered with the render loop. Visual only — nothing here feeds gameplay,
+// and phases derive from world positions so no rng draws are spent (the
+// seeded city layout stays byte-identical).
+let swayCrowns = [];
+let lampGlows = [];
+let facadeTex = [];
+let cruiserBar = null;
+
+/** Queue a lamp head for a slow glow breathe, phased by its position. */
+function queueLamp(material, base, x, z) {
+  lampGlows.push({ mat: material, base, phase: x * 2.3 + z * 0.8 });
+}
+
+/** Queue a placed palm's crown for gentle sway, phased by its position so
+ *  no two palms move in lockstep. */
+function queuePalmSway(p) {
+  const crown = p.userData.crown;
+  crown.userData.sway = {
+    phase: p.position.x * 1.3 + p.position.z * 0.7,
+    speed: 0.5 + Math.abs(Math.sin(p.position.z * 0.31)) * 0.5,
+  };
+  swayCrowns.push(crown);
+}
 
 // Concrete geometry shared across the whole city so we only make it once.
 // Every building/box/palm reuses these units, which keeps the draw call and
@@ -122,11 +147,15 @@ function buildGround(group) {
 /** The ocean plane, laid flat and slightly sunken, plus the beach sand mound
  *  and a cheap additive sun-path aligned with the low sun's bearing. */
 function buildWater(group) {
-  const ocean = new THREE.Mesh(GEO.box, new THREE.MeshStandardMaterial({
+  // Own segmented plane (not the shared unit box) so scene.js can ripple its
+  // vertices gently. Same colour/finish and same surface height as before.
+  const oceanGeo = new THREE.PlaneGeometry(SEA.extent * 2, WORLD.total * 1.6, 24, 24);
+  const ocean = new THREE.Mesh(oceanGeo, new THREE.MeshStandardMaterial({
     color: 0x275f80, roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.9,
   }));
-  ocean.scale.set(SEA.extent * 2, 1, WORLD.total * 1.6);
-  ocean.position.set(westEdge() - SEA.extent, SEA.level, 0);
+  ocean.rotation.x = -Math.PI / 2;
+  ocean.position.set(westEdge() - SEA.extent, SEA.level + 0.5, 0);
+  ocean.name = 'ocean'; // scene.js finds it by this name for the swell tick
   group.add(ocean);
 
   // Sun-path: two additive strips on the water along the sun bearing (the
@@ -198,10 +227,11 @@ function buildBoardwalk(group, rng) {
     pole.scale.set(0.1, 3.6, 0.1);
     pole.position.set(westEdge() + COAST.boardwalkWidth - 0.6, 1.8, z + rand(rng, -4, 4));
     group.add(pole);
-    const head = new THREE.Mesh(GEO.sphere, headMat);
+    const head = new THREE.Mesh(GEO.sphere, headMat.clone());
     head.scale.set(0.55, 0.55, 0.55);
     head.position.set(pole.position.x, 3.75, pole.position.z);
     group.add(head);
+    queueLamp(head.material, 1.1, pole.position.x, pole.position.z);
   }
 
   // Planters on the inland edge: terracotta box + a clipped shrub.
@@ -219,7 +249,9 @@ function buildBoardwalk(group, rng) {
   }
 }
 
-/** One palm: leaning cylinder trunk + a fan of cone fronds. */
+/** One palm: leaning cylinder trunk + a fan of cone fronds. The fronds hang
+ *  off one crown group so ambient sway can rock the head around the trunk
+ *  top without touching the trunk. */
 function makePalm(rng, trunkMat, frondMat, h) {
   const p = new THREE.Group();
   const trunk = new THREE.Mesh(GEO.cylinder, trunkMat);
@@ -227,15 +259,18 @@ function makePalm(rng, trunkMat, frondMat, h) {
   trunk.position.y = h / 2;
   trunk.rotation.z = rand(rng, -0.18, 0.18);
   p.add(trunk);
+  const crown = new THREE.Group();
+  crown.position.y = h + 0.3;
   for (let f = 0; f < 5; f += 1) {
     const frond = new THREE.Mesh(GEO.cone, frondMat);
     frond.scale.set(1.1, 0.9 + rng() * 0.9, 0.9);
-    frond.position.y = h + 0.3;
     const ang = (f / 5) * Math.PI * 2 + rng();
     frond.rotation.x = 1.5;
     frond.rotation.y = ang;
-    p.add(frond);
+    crown.add(frond);
   }
+  p.add(crown);
+  p.userData.crown = crown;
   return p;
 }
 
@@ -254,6 +289,7 @@ function buildPalms(group, rng) {
       const p = makePalm(rng, trunkMat, frondMat, 3.5 + rand(rng, 0, 1.6));
       p.position.set(x + rand(rng, -1.5, 1.5), 0, z + rand(rng, -3, 3));
       group.add(p);
+      queuePalmSway(p);
     }
     z += rand(rng, 13, 34);
   }
@@ -266,6 +302,7 @@ function buildPalms(group, rng) {
       const p = makePalm(rng, trunkMat, frondMat, 4.5 + rand(rng, 0, 1.8));
       p.position.set(westEdge() - rand(rng, 6, 30), SEA.sandLevel, z + rand(rng, -5, 5));
       group.add(p);
+      queuePalmSway(p);
     }
     z += rand(rng, 30, 62);
   }
@@ -280,6 +317,7 @@ function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1) {
   const deco = district.deco === true;
   const floors = Math.max(2, Math.round(district.maxH / 3));
   const tex = makeFacadeTexture(district.palette, floors, rng, deco);
+  facadeTex.push(tex); // ambient window toggles pick from these
   const roof = pick(rng, district.palette);
   const h = rand(rng, district.minH, district.maxH);
   const mesh = new THREE.Mesh(GEO.box, new THREE.MeshStandardMaterial({
@@ -581,12 +619,13 @@ function buildProps(group, rng) {
     pole.scale.set(0.12, 5, 0.12);
     pole.position.y = 2.5;
     lamp.add(pole);
-    const head = new THREE.Mesh(GEO.box, lightMat);
+    const head = new THREE.Mesh(GEO.box, lightMat.clone());
     head.scale.set(1.6, 0.3, 0.5);
     head.position.set(0, 5.1, 0);
     lamp.add(head);
     lamp.position.set(westEdge() + COAST.boulevardWidth + 1, 0, z);
     group.add(lamp);
+    queueLamp(head.material, 0.6, lamp.position.x, z);
   }
 
   // Fire hydrants, benches and traffic lights at random points.
@@ -610,12 +649,13 @@ function buildProps(group, rng) {
       pole.scale.set(0.1, 4, 0.1);
       pole.position.y = 2;
       t.add(pole);
-      const bulb = new THREE.Mesh(GEO.box, lightMat);
+      const bulb = new THREE.Mesh(GEO.box, lightMat.clone());
       bulb.scale.set(0.5, 0.5, 0.5);
       bulb.position.set(0, 4.2, 0);
       t.add(bulb);
       t.position.set(x, 0, z);
       group.add(t);
+      queueLamp(bulb.material, 0.6, x, z);
     }
   }
 }
@@ -660,16 +700,69 @@ function buildBoulevardProps(group, rng) {
   }
 }
 
+/** A parked police cruiser on the east kerb of the first coastal road, at
+ *  the spawn latitude — ambient presence only, in the same navy/white livery
+ *  as the pursuit units. No collider, no AI, no traffic change: it sits clear
+ *  of both drive lanes (road centre ±3m) and of the power-pole line, and its
+ *  lightbar pulses on the ambient tick. */
+function buildParkedCruiser(group) {
+  const roadX = westEdge() + WORLD.block + WORLD.road; // first N-S road centre
+  const car = new THREE.Group();
+  const body = new THREE.Mesh(GEO.box, mat(0x1c2a52, 0x0a0c14));
+  body.scale.set(1.9, 0.75, 4.4);
+  body.position.y = 0.55;
+  car.add(body);
+  // White door band + cabin: the two-tone reads as police at a glance.
+  const doors = new THREE.Mesh(GEO.box, mat(0xeef1f6));
+  doors.scale.set(1.94, 0.34, 2.3);
+  doors.position.set(0, 0.62, -0.2);
+  car.add(doors);
+  const cabin = new THREE.Mesh(GEO.box, mat(0xeef1f6, 0x0a0c10));
+  cabin.scale.set(1.7, 0.6, 2.2);
+  cabin.position.set(0, 1.2, -0.2);
+  car.add(cabin);
+  const glass = new THREE.Mesh(GEO.box, mat(0x0c1622));
+  glass.scale.set(1.72, 0.3, 1.9);
+  glass.position.set(0, 1.28, -0.2);
+  car.add(glass);
+  // Roof lightbar: red/blue lamps, swapped slowly by the ambient updater.
+  const bar = new THREE.Mesh(GEO.box, mat(0x2a3138));
+  bar.scale.set(0.9, 0.1, 0.5);
+  bar.position.set(0, 1.56, -0.3);
+  car.add(bar);
+  const redMat = new THREE.MeshStandardMaterial({ color: 0x660000, emissive: 0xff2020, emissiveIntensity: 1.2 });
+  const blueMat = new THREE.MeshStandardMaterial({ color: 0x000a55, emissive: 0x2a6bff, emissiveIntensity: 0.2 });
+  const red = new THREE.Mesh(GEO.box, redMat);
+  red.scale.set(0.36, 0.16, 0.44);
+  red.position.set(-0.22, 1.66, -0.3);
+  car.add(red);
+  const blue = new THREE.Mesh(GEO.box, blueMat);
+  blue.scale.set(0.36, 0.16, 0.44);
+  blue.position.set(0.22, 1.66, -0.3);
+  car.add(blue);
+  cruiserBar = { redMat, blueMat };
+  car.position.set(roadX + WORLD.road / 2 - 1.6, 0, SPAWN.z);
+  car.rotation.y = Math.PI + 0.04;
+  group.add(car);
+}
+
 /** Main entry: build the whole island into a THREE.Group. */
 export function createCity(scene, rng) {
   const group = new THREE.Group();
   scene.add(group);
+
+  // Reset the ambient lists so a rebuild never doubles up dressing ticks.
+  swayCrowns = [];
+  lampGlows = [];
+  facadeTex = [];
+  cruiserBar = null;
 
   buildGround(group);
   buildWater(group);
   buildBoardwalk(group, rng);
   buildPalms(group, rng);
   buildBoulevardProps(group, rng);
+  buildParkedCruiser(group);
 
   // Walk the 8x8 grid, assigning each block to the nearest district.
   const districts = new Map();
@@ -723,6 +816,51 @@ export function createCity(scene, rng) {
     { x: SPAWN.x, z: SPAWN.z + 8 },
     { x: SPAWN.x - 6, z: SPAWN.z + 4 },
   ];
+
+  // One ambient tick for all the dressing above — visual only, driven by the
+  // render loop, never by the simulation step.
+  let winTimer = 2;
+  registerAmbient((time, dt) => {
+    // Palm crowns rock gently, each on its own phase and speed.
+    for (const crown of swayCrowns) {
+      const s = crown.userData.sway;
+      crown.rotation.z = Math.sin(time * s.speed + s.phase) * 0.06;
+      crown.rotation.x = Math.cos(time * s.speed * 0.8 + s.phase) * 0.05;
+    }
+    // Lamp heads breathe ±10% around their base glow, out of sync.
+    for (const lamp of lampGlows) {
+      lamp.mat.emissiveIntensity = lamp.base * (0.9 + 0.1 * Math.sin(time * 1.6 + lamp.phase));
+    }
+    // Every few seconds a handful of windows flip on/off across the island.
+    winTimer -= dt;
+    if (winTimer <= 0 && facadeTex.length) {
+      winTimer = 1.5 + Math.random() * 2.5;
+      const flips = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < flips; i += 1) {
+        const tex = facadeTex[Math.floor(Math.random() * facadeTex.length)];
+        const wins = tex.userData.windows;
+        if (!wins.length) continue;
+        const win = wins[Math.floor(Math.random() * wins.length)];
+        win.lit = !win.lit;
+        const ctx = tex.image.getContext('2d');
+        const { winW, winH, wall } = tex.userData;
+        if (!win.lit) {
+          // Repaint the wall first so the dark glass blends as originally.
+          ctx.fillStyle = wall;
+          ctx.fillRect(win.x, win.y, winW, winH);
+        }
+        ctx.fillStyle = win.lit ? '#ffc978' : 'rgba(24,28,44,0.85)';
+        ctx.fillRect(win.x, win.y, winW, winH);
+        tex.needsUpdate = true;
+      }
+    }
+    // The parked cruiser's lightbar swaps red/blue on a slow idle pulse.
+    if (cruiserBar) {
+      const red = Math.sin(time * 2.1) > 0;
+      cruiserBar.redMat.emissiveIntensity = red ? 1.2 : 0.2;
+      cruiserBar.blueMat.emissiveIntensity = red ? 0.2 : 1.2;
+    }
+  });
 
   return { group, districts, roads: districts, colliders, spawnPoints, wheel };
 }

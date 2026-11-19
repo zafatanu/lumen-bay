@@ -58,6 +58,15 @@ export function createDriver(state, city, scene) {
   let driftScore = 0;      // accumulated drift score
   let heroCam = false;     // staged cover framing (?stage=chase only)
 
+  // --- Visual-only body feel (mesh transforms, never physics): eased yaw
+  // and steer angle, plus spring-damped roll on steering and pitch on
+  // accel/brake so the body leans with weight instead of staying rigid.
+  let visYaw = 0;          // mesh yaw, eases toward the physics heading
+  let visSteer = 0;        // front-wheel angle, eases toward steering
+  let roll = 0, rollV = 0;
+  let pitch = 0, pitchV = 0;
+  let prevSpeed = 0;       // for the visual accel/brake pitch target
+
   // --- Tire smoke: a small capped pool of soft sprites at the rear wheels.
   // Visual only — it never touches speed, steering or collision. A tiny LCG
   // keeps the jitter deterministic so a staged frame reproduces from a seed.
@@ -135,6 +144,10 @@ export function createDriver(state, city, scene) {
     nitro = CAR.nitroMax;
     car.position.copy(pos);
     car.rotation.y = heading;
+    visYaw = heading;   // visual layer starts aligned, no snap on entry
+    visSteer = 0;
+    roll = rollV = pitch = pitchV = 0;
+    prevSpeed = 0;
     scene.add(car);
   }
 
@@ -233,14 +246,32 @@ export function createDriver(state, city, scene) {
     }
 
     car.position.copy(pos);
-    car.rotation.y = heading;
 
-    // Wheels spin with the distance travelled. Each wheel is an axle group
-    // (see cars.js) that we roll around its local Z — the axle axis.
+    // --- Visual layer only: mesh transforms below never feed back into
+    // speed, heading, pos or collision. Eased yaw + spring-damped roll on
+    // steering and pitch on accel/brake give the body a sense of weight.
+    const vdt = Math.min(dt, 0.05);   // clamp so springs stay stable on lag spikes
+    visYaw += (heading - visYaw) * Math.min(1, vdt * 12);
+    visSteer += (steering - visSteer) * Math.min(1, vdt * 9);
+    const accelG = (speed - prevSpeed) / Math.max(dt, 1e-4);
+    prevSpeed = speed;
+    // Lean outward in turns; nose up under throttle, dive under braking.
+    const rollT = THREE.MathUtils.clamp(steering * speedFactor, -1.4, 1.4) * 0.055;
+    const pitchT = THREE.MathUtils.clamp(-accelG * 0.004, -0.06, 0.06);
+    rollV += ((rollT - roll) * 40 - rollV * 9) * vdt;
+    roll += rollV * vdt;
+    pitchV += ((pitchT - pitch) * 50 - pitchV * 10) * vdt;
+    pitch += pitchV * vdt;
+    car.rotation.set(pitch, visYaw, roll);
+
+    // Wheels roll with the distance travelled around their local X axle
+    // (see cars.js); the front pair eases toward the steering input on Y.
     const spin = (speed / 0.34) * dt;
+    const wheelAngle = THREE.MathUtils.clamp(visSteer * 0.35, -0.5, 0.5);
     for (const child of car.children) {
       if (child.userData && child.userData.wheel) {
-        child.rotation.z += spin * (child.position.z > 0 ? 1 : -1);
+        child.rotation.x += spin;
+        if (child.position.z > 0) child.rotation.y = wheelAngle;
       }
     }
 
@@ -290,8 +321,23 @@ export function createDriver(state, city, scene) {
     const up = 2.6 + speedKmh() * 0.02;
     const bx = pos.x - Math.sin(heading) * back;
     const bz = pos.z - Math.cos(heading) * back;
-    camera.position.set(bx, pos.y + up, bz);
-    camera.lookAt(pos.x, pos.y + 1.2, pos.z);
+    const by = pos.y + up;
+    // Ease position and look toward the same targets as before — only the
+    // approach is smoothed, so turns swing instead of snapping.
+    const k = Math.min(1, dt * 8);
+    camera.position.x += (bx - camera.position.x) * k;
+    camera.position.y += (by - camera.position.y) * k;
+    camera.position.z += (bz - camera.position.z) * k;
+    const tx = pos.x, ty = pos.y + 1.2, tz = pos.z;
+    let look = camera.userData.driveLook;
+    if (!look) { look = new THREE.Vector3(tx, ty, tz); camera.userData.driveLook = look; }
+    const dx = tx - look.x, dy = ty - look.y, dz = tz - look.z;
+    if (dx * dx + dy * dy + dz * dz > 144) look.set(tx, ty, tz);  // teleport: snap, don't sweep
+    const lk = Math.min(1, dt * 10);
+    look.x += (tx - look.x) * lk;
+    look.y += (ty - look.y) * lk;
+    look.z += (tz - look.z) * lk;
+    camera.lookAt(look.x, look.y, look.z);
     const fovTarget = 55 + speedKmh() * 0.25;
     camera.fov += (fovTarget - camera.fov) * Math.min(1, dt * 4);
     camera.updateProjectionMatrix();

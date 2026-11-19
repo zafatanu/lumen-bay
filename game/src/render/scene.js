@@ -12,6 +12,13 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
+// --- Ambient dressing hooks (visual only). ---
+// city.js registers small per-frame updaters here (palm sway, lamp glow,
+// window toggles, cruiser lightbar); update() ticks them so the city
+// breathes without any gameplay system knowing about it.
+const ambientUpdaters = [];
+export function registerAmbient(fn) { ambientUpdaters.push(fn); }
+
 /** Shared helper: paint a building facade (windows grid) onto a canvas texture.
  *  Deterministic: pass the city's seeded rng so the same city reproduces exactly.
  *  deco=true adds art-deco pilasters + floor bands for the showcase districts.
@@ -47,6 +54,9 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
   }
 
   const lightP = 0.22;
+  // Remember the toggleable window rects (clear of the parapet, plinth and
+  // door overlays painted below) so ambient dressing can flip a few lights.
+  const windows = [];
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
       const x = w * (c + 1) / (cols + 1) - winW / 2;
@@ -54,6 +64,7 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
       const lit = rng() < lightP;
       ctx.fillStyle = lit ? (rng() < 0.5 ? '#ffc978' : '#ffe3b0') : 'rgba(24,28,44,0.85)';
       ctx.fillRect(x, y, winW, winH);
+      if (y > h * 0.06 && y + winH < h * 0.76) windows.push({ x, y, lit });
       if (deco) {
         // A small sill under each window sells the painted depth.
         ctx.fillStyle = shade(wall, 0.75);
@@ -63,6 +74,10 @@ export function makeFacadeTexture(palette, floors, rng, deco = false) {
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.userData.windows = windows;
+  tex.userData.winW = winW;
+  tex.userData.winH = winH;
+  tex.userData.wall = wall;
 
   // A dark parapet band along the top edge and a recessed door on the ground
   // floor make the box facades read as built buildings, not blank walls.
@@ -192,6 +207,8 @@ export function createRenderer3D(canvas) {
 
   // --- Player spawn marker (replaced by the actual player later). ---
   let time = 0;
+  // The ocean plane is built by city.js under this name; grab it once.
+  let ocean = null;
 
   // Day/night transition: minutes from start (17:40) to midnight toward 06:00.
   // t goes 0 at 17:40 to 1 at 06:00 (next morning) → night creeps in.
@@ -217,6 +234,26 @@ export function createRenderer3D(canvas) {
     // night creep stays one continuous identity, not a second palette.
     skyMat.uniforms.glowStrength.value = THREE.MathUtils.lerp(1.0, 0.12, nightT);
     fill.intensity = THREE.MathUtils.lerp(SUNSET.fillIntensity, 0.22, nightT);
+
+    // Gentle ocean motion: a slow vertex swell on the ocean plane plus a
+    // faint roughness breathe, so the low sun's specular glint shifts like
+    // moving water. Same surface height, same palette — no new lights.
+    if (!ocean) ocean = scene.getObjectByName('ocean');
+    if (ocean) {
+      const pos = ocean.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i += 1) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        pos.setZ(i, Math.sin(x * 0.08 + time * 0.7) * 0.1
+          + Math.cos(y * 0.05 + time * 0.45) * 0.1);
+      }
+      pos.needsUpdate = true;
+      ocean.geometry.computeVertexNormals();
+      ocean.material.roughness = 0.15 + Math.sin(time * 0.4) * 0.04;
+    }
+
+    // Ambient city dressing (palm sway, lamps, windows, cruiser lightbar).
+    for (const fn of ambientUpdaters) fn(time, dt);
 
     renderer.render(scene, camera);
   }

@@ -42,6 +42,15 @@ export function buildCarMesh(def) {
   body.castShadow = true;
   group.add(body);
 
+  // Tapered hood: a thin painted wedge sloping down toward the nose, so the
+  // front end reads as a slope instead of a second stacked box.
+  const hood = new THREE.Mesh(GEOMETRY.body, paint);
+  hood.scale.set(1.72, 0.16, 1.35);
+  hood.position.set(0, 0.96, 1.3);
+  hood.rotation.x = 0.14;
+  hood.castShadow = true;
+  group.add(hood);
+
   // Cabin: a smaller box on top. The convertible sits lower with no top box.
   const isConvertible = def.name === 'Coral Cruiser';
   const cab = new THREE.Mesh(GEOMETRY.body, paint);
@@ -51,10 +60,9 @@ export function buildCarMesh(def) {
   cab.castShadow = true;
   group.add(cab);
 
-  // Windows: dark glass boxes inset into the cabin sides and front/rear.
+  // Windows: dark glass boxes inset into the cabin sides and rear.
   const winH = isConvertible ? 0.2 : 0.34;
   for (const [dx, dz, w, d] of [
-    [0, 0.1, 0.2, 1.7],  // front
     [0, -0.6, 0.2, 1.0], // rear
     [0.78, -0.2, 0.18, 1.7], // left
     [-0.78, -0.2, 0.18, 1.7], // right
@@ -65,17 +73,35 @@ export function buildCarMesh(def) {
     group.add(win);
   }
 
+  // Windshield: a glass plane leaned back over the hood instead of a flat
+  // front window box, so the cabin front reads as a rake, not a slab.
+  const shield = new THREE.Mesh(GEOMETRY.body, glassMat);
+  shield.scale.set(1.42, cabH + 0.05, 0.06);
+  shield.position.set(0, body.position.y + 0.42 + cabH / 2 - 0.02, 0.86);
+  shield.rotation.x = -0.42;
+  group.add(shield);
+
   // Wheels: four dark cylinders, radius 0.34, each on its own axle group so
-  // the driving code can roll it around its local Z (the axle) without the
-  // wheel cylinder's own pitch rotating the contact patch off the road.
+  // the driving code can roll it around its local X (the axle) and steer the
+  // front pair around Y without moving the contact patch off the road.
   const wheelGeo = GEOMETRY.wheel;
   const tyreMat = new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.9, metalness: 0.1 });
   const wR = 0.34;
   const wHalf = 0.16;
+  // Wheel wells: dark arch panels flush with the body sides so the wheels
+  // sit in shadowed openings instead of floating beside a plain slab.
+  for (const [x, z] of [[0.97, 1.25], [-0.97, 1.25], [0.97, -1.25], [-0.97, -1.25]]) {
+    const well = new THREE.Mesh(GEOMETRY.body, tyreMat);
+    well.scale.set(0.16, 0.6, 1.05);
+    well.position.set(x, 0.56, z);
+    group.add(well);
+  }
   for (const [x, z] of [[1.05, 1.25], [-1.05, 1.25], [1.05, -1.25], [-1.05, -1.25]]) {
     const axle = new THREE.Group();
     const w = new THREE.Mesh(wheelGeo, tyreMat);
-    w.scale.set(wHalf, wR * 2, wR * 2);
+    // Circular disc of radius wR in the Y/Z plane, thin along the X axle.
+    // (The baked Z-rotation below turns the cylinder's Y height into the axle.)
+    w.scale.set(wR, 0.22, wR);
     w.rotation.z = Math.PI / 2;
     axle.add(w);
     axle.position.set(x, wR, z);
@@ -83,25 +109,21 @@ export function buildCarMesh(def) {
     group.add(axle);
   }
 
-  // Headlights: two small emissive boxes at the front. The emissive glow
-  // makes every car visible against the dusk skyline, so traffic pops in the
-  // chase shot without any extra lighting work.
+  // Headlight bar: one full-width warm emissive strip at the front. The
+  // emissive glow makes every car visible against the dusk skyline, so
+  // traffic pops in the chase shot without any extra lighting work.
   const lightMat = new THREE.MeshStandardMaterial({ color: 0xfff2d0, emissive: 0xffd9a0, emissiveIntensity: 1.4 });
-  for (const x of [0.55, -0.55]) {
-    const h = new THREE.Mesh(GEOMETRY.body, lightMat);
-    h.scale.set(0.3, 0.16, 0.12);
-    h.position.set(x, 0.74, 2.06);
-    group.add(h);
-  }
+  const head = new THREE.Mesh(GEOMETRY.body, lightMat);
+  head.scale.set(1.5, 0.1, 0.12);
+  head.position.set(0, 0.74, 2.06);
+  group.add(head);
 
-  // Tail lights: two red emissive strips at the back.
+  // Tail light bar: one red emissive strip across the back.
   const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2f2f, emissive: 0xff2f2f, emissiveIntensity: 0.8 });
-  for (const x of [0.6, -0.6]) {
-    const t = new THREE.Mesh(GEOMETRY.body, tailMat);
-    t.scale.set(0.5, 0.16, 0.12);
-    t.position.set(x, 0.66, -2.06);
-    group.add(t);
-  }
+  const tail = new THREE.Mesh(GEOMETRY.body, tailMat);
+  tail.scale.set(1.6, 0.1, 0.12);
+  tail.position.set(0, 0.66, -2.06);
+  group.add(tail);
 
   // A wheel radius the driving physics uses for the circle collider.
   group.userData.def = def;
