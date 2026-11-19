@@ -94,22 +94,29 @@ function stageChase(ctx) {
   driver.updateCamera(camera, 0.016);
   camera.lookAt(x, 1.2, z);
 
-  // ~20s of real driving + police pursuit along the boulevard.
+  // ~6s of real driving + police pursuit along the boulevard.
   const snap = driveSnap();
-  for (let i = 0; i < 1200; i += 1) {
+  for (let i = 0; i < 360; i += 1) {
     ctx.stepWorld(STEP, snap);
     // A light weave keeps the shot from dead straight; straight reads cleaner.
-    if (i === 500) ctx.stepWorld(STEP, { ...snap, left: true });
-    if (i === 600) ctx.stepWorld(STEP, { ...snap, right: true });
+    if (i === 150) ctx.stepWorld(STEP, { ...snap, left: true });
+    if (i === 180) ctx.stepWorld(STEP, { ...snap, right: true });
   }
+
+  // Re-assert the manhunt so the stars/heat survive the seconds until capture.
+  wanted.setStars(3);
+  state.stars = 3;
+  state.heat = 80;
 
   // Leave the crosshair off the wheel and a drift payout popup on screen.
   state.pushPopup('DRIFT x2 +$100');
   state.driftScore += 200;
   state.money += 100;
 
+  ctx.setScreen('play');
   ctx.hud.update(STEP);
   ctx.update(STEP, state.clockMinutes);
+  return driveSnap();
 }
 
 // --shots-shootout-- marker: shootout scene appends below
@@ -141,9 +148,10 @@ function stageShootout(ctx) {
   state.health = 78;
   state.armour = 46;
 
-  // Three Gulls stand down the road, hostile markers up.
+  // Three Gulls stand down the road, hostile markers up. High health so
+  // sustained fire during capture does not clear the scene before the shot.
   for (let i = 0; i < 3; i += 1) {
-    enemies.spawnEnemy('gull', { x: px - 9 - i * 3, z: pz }, { health: 88 });
+    enemies.spawnEnemy('gull', { x: px - 9 - i * 3, z: pz }, { health: 500 });
   }
 
   // Frame the fight head-on: the camera already swings to aim via combat.
@@ -154,8 +162,10 @@ function stageShootout(ctx) {
     ctx.stepWorld(STEP, shootSnap(true));
   }
 
+  ctx.setScreen('play');
   ctx.hud.update(STEP);
   ctx.update(STEP, state.clockMinutes);
+  return shootSnap(true);
 }
 
 // --shots-menu-- marker: menu scene appends below

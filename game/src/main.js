@@ -37,6 +37,9 @@ function boot() {
   const canvas = document.getElementById('world3d');
   const input = createInput();
   const state = createState();
+  // Captured once when a ?shot= scene is staged, then replayed each frame so
+  // the autopilot keeps driving/firing until the screenshot lands.
+  let shotSnap = null;
   const renderer = createRenderer3D(canvas);
   const { scene, camera, update, resize } = renderer;
 
@@ -452,17 +455,17 @@ function boot() {
     last = now;
     accumulator += frameTime;
     handleScreens();
-    input.clear();
     // Only step the simulation while actually playing; the menu/map/pause
     // screens freeze the world (rendered statically each frame behind them).
     if (screen === 'play') {
       while (accumulator >= STEP) {
-        step(STEP);
+        step(STEP, shotSnap || undefined);
         accumulator -= STEP;
       }
     } else {
       accumulator = 0;
     }
+    input.clear();
     // Scene render + HUD refresh happen once per display frame.
     if (screen === 'menu') menuCamera(frameTime);
     update(STEP, state.clockMinutes);
@@ -659,7 +662,7 @@ function boot() {
       setScreen, ensureRadio, applySettings,
       stepWorld: step, update,
     };
-    stageShot(SHOT_SCENES.includes(shotName) ? shotName : '3-menu', shotCtx);
+    shotSnap = stageShot(SHOT_SCENES.includes(shotName) ? shotName : '3-menu', shotCtx);
     let stagedFrames = 0;
     const flagReady = () => {
       stagedFrames += 1;
