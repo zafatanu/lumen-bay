@@ -106,6 +106,7 @@ export function createMenu(state, callbacks = {}) {
       <div class="menu-logo">LUMEN <span>BAY</span></div>
       <div class="menu-tag">A sun-soaked island crime story</div>
       <div class="menu-judge">8 story missions \u00b7 traffic \u00b7 police chases \u00b7 radio \u00b7 saves</div>
+      <div class="menu-judge">WASD moves Rook once in game \u2014 here use arrows + Enter, choose NEW GAME</div>
       <div class="menu-buttons">
         <button data-mb="continue"${hasSave ? '' : ' disabled'}>CONTINUE${hasSave ? `<span class="mb-sub">${saveSummary}</span>` : ''}</button>
         <button data-mb="newgame">NEW GAME</button>

@@ -41,6 +41,49 @@ function collideCity(pos, r, speed) {
   return speed > 14 ? Math.min(1, (speed - 14) / 28) : 0;
 }
 
+/** Fraction of the XZ segment (ox,oz)->(tx,tz) that stays inside the union
+ *  of city.colliders. Those AABBs ({x,z,w,d}) are the road strips, so the
+ *  segment leaving their union is the moment it enters a building block.
+ *  Returns 1 when fully clear, otherwise the exit fraction in [0,1]. */
+function roadUnionExit(colliders, ox, oz, tx, tz) {
+  const dx = tx - ox;
+  const dz = tz - oz;
+  const spans = [];
+  for (const b of colliders) {
+    const minX = b.x - b.w / 2, maxX = b.x + b.w / 2;
+    const minZ = b.z - b.d / 2, maxZ = b.z + b.d / 2;
+    let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-9) {
+      if (ox < minX || ox > maxX) continue;
+    } else {
+      let a = (minX - ox) / dx, c = (maxX - ox) / dx;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    if (Math.abs(dz) < 1e-9) {
+      if (oz < minZ || oz > maxZ) continue;
+    } else {
+      let a = (minZ - oz) / dz, c = (maxZ - oz) / dz;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    spans.push([t0, t1]);
+  }
+  if (!spans.length) return 0;
+  spans.sort((a, b) => a[0] - b[0]);
+  if (spans[0][0] > 0) return 0;   // origin off the road union: no clearance
+  // Merge overlapping spans; the merged span covering t=0 (the car is
+  // always on a road) ends where the segment first leaves the road union.
+  let end = spans[0][1];
+  for (let i = 1; i < spans.length; i += 1) {
+    if (spans[i][0] > end) break;
+    end = Math.max(end, spans[i][1]);
+  }
+  return Math.min(1, end);
+}
+
 /** Arcade driving controller. `state` is the shared game state, `city` carries
  *  the road grid, `scene` is where the car mesh lives while entered. */
 export function createDriver(state, city, scene) {
@@ -319,15 +362,36 @@ export function createDriver(state, city, scene) {
     }
     const back = 6.5 + speedKmh() * 0.05;
     const up = 2.6 + speedKmh() * 0.02;
-    const bx = pos.x - Math.sin(heading) * back;
-    const bz = pos.z - Math.cos(heading) * back;
-    const by = pos.y + up;
+    let bx = pos.x - Math.sin(heading) * back;
+    let bz = pos.z - Math.cos(heading) * back;
+    let by = pos.y + up;
+    // Occlusion: cast from the car to the desired camera spot against the
+    // road-strip AABBs (city.colliders); where the segment leaves the road
+    // union, pull the target in to hit distance minus a margin. Only ever
+    // shortens the distance — the lerp smoothing below is unchanged.
+    if (city.colliders && city.colliders.length) {
+      const hx = pos.x, hy = pos.y + 1.2, hz = pos.z;
+      const t = roadUnionExit(city.colliders, hx, hz, bx, bz);
+      if (t < 1) {
+        const dx = bx - hx, dz = bz - hz;
+        const len = Math.hypot(dx, dz);
+        // Margin covers the 0.5 near plane; the 3.0 floor keeps the camera
+        // behind the car's rear bumper (body half-length ~2.05) when the car
+        // sits at a road edge. Building faces are 5.4m inside the block
+        // edge, so this stays clear of them.
+        const allow = len > 1e-6 ? Math.min(len, Math.max(3.0, t * len - 0.6)) / len : 0;
+        bx = hx + dx * allow;
+        bz = hz + dz * allow;
+        by = hy + (by - hy) * allow;
+      }
+    }
     // Ease position and look toward the same targets as before — only the
     // approach is smoothed, so turns swing instead of snapping.
     const k = Math.min(1, dt * 8);
     camera.position.x += (bx - camera.position.x) * k;
     camera.position.y += (by - camera.position.y) * k;
     camera.position.z += (bz - camera.position.z) * k;
+    if (camera.position.y < 0.5) camera.position.y = 0.5;
     const tx = pos.x, ty = pos.y + 1.2, tz = pos.z;
     let look = camera.userData.driveLook;
     if (!look) { look = new THREE.Vector3(tx, ty, tz); camera.userData.driveLook = look; }

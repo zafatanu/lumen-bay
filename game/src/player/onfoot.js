@@ -33,6 +33,49 @@ function clampToRoads(pos, r) {
   else pos.z = nz.line + Math.sign(nz.d) * (WORLD.road / 2 - r);
 }
 
+/** Fraction of the XZ segment (ox,oz)->(tx,tz) that stays inside the union
+ *  of city.colliders. Those AABBs ({x,z,w,d}) are the road strips, so the
+ *  segment leaving their union is the moment it enters a building block.
+ *  Returns 1 when fully clear, otherwise the exit fraction in [0,1]. */
+function roadUnionExit(colliders, ox, oz, tx, tz) {
+  const dx = tx - ox;
+  const dz = tz - oz;
+  const spans = [];
+  for (const b of colliders) {
+    const minX = b.x - b.w / 2, maxX = b.x + b.w / 2;
+    const minZ = b.z - b.d / 2, maxZ = b.z + b.d / 2;
+    let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-9) {
+      if (ox < minX || ox > maxX) continue;
+    } else {
+      let a = (minX - ox) / dx, c = (maxX - ox) / dx;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    if (Math.abs(dz) < 1e-9) {
+      if (oz < minZ || oz > maxZ) continue;
+    } else {
+      let a = (minZ - oz) / dz, c = (maxZ - oz) / dz;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    spans.push([t0, t1]);
+  }
+  if (!spans.length) return 0;
+  spans.sort((a, b) => a[0] - b[0]);
+  if (spans[0][0] > 0) return 0;   // origin off the road union: no clearance
+  // Merge overlapping spans; the merged span covering t=0 (the player is
+  // always on a road) ends where the segment first leaves the road union.
+  let end = spans[0][1];
+  for (let i = 1; i < spans.length; i += 1) {
+    if (spans[i][0] > end) break;
+    end = Math.max(end, spans[i][1]);
+  }
+  return Math.min(1, end);
+}
+
 /** Build Rook: teal jacket, dark jeans, cap. Returns a THREE.Group. */
 export function buildPlayerMesh() {
   const group = new THREE.Group();
@@ -73,16 +116,39 @@ export function buildPlayerMesh() {
   return group;
 }
 
-/** Third-person follow camera behind Rook, smoothed so it lags on turns. */
-export function followCamera(camera, dt, pos, heading) {
+/** Third-person follow camera behind Rook, smoothed so it lags on turns.
+ *  `colliders` (city.colliders, optional) enables occlusion pull-in so the
+ *  camera never swings into a building block. */
+export function followCamera(camera, dt, pos, heading, colliders) {
   const back = 3.4;
   const up = 3.1;
-  const cx = pos.x - Math.sin(heading) * back;
-  const cz = pos.z - Math.cos(heading) * back;
+  let cx = pos.x - Math.sin(heading) * back;
+  let cz = pos.z - Math.cos(heading) * back;
+  let cy = pos.y + up;
+  // Occlusion: cast from Rook's head to the desired camera spot against the
+  // road-strip AABBs; where the segment leaves the road union, pull the
+  // target in to hit distance minus a margin. Only ever shortens the
+  // distance — the lerp smoothing below is unchanged.
+  if (colliders && colliders.length) {
+    const hx = pos.x, hy = pos.y + 1.6, hz = pos.z;
+    const t = roadUnionExit(colliders, hx, hz, cx, cz);
+    if (t < 1) {
+      const dx = cx - hx, dz = cz - hz;
+      const len = Math.hypot(dx, dz);
+      // Margin covers the 0.5 near plane; the 1.0 floor keeps the camera
+      // out of Rook's own mesh when he stands at a road edge (the building
+      // faces sit 5.4m inside the block edge, so this stays clear of them).
+      const allow = len > 1e-6 ? Math.min(len, Math.max(1.0, t * len - 0.6)) / len : 0;
+      cx = hx + dx * allow;
+      cz = hz + dz * allow;
+      cy = hy + (cy - hy) * allow;
+    }
+  }
   const k = Math.min(1, dt * 8);
   camera.position.x += (cx - camera.position.x) * k;
-  camera.position.y += (pos.y + up - camera.position.y) * k;
+  camera.position.y += (cy - camera.position.y) * k;
   camera.position.z += (cz - camera.position.z) * k;
+  if (camera.position.y < 0.5) camera.position.y = 0.5;
   // Ease the look point as well as the position so a quick turn swings the
   // view instead of whipping it. The target is unchanged (Rook's chest).
   const tx = pos.x, ty = pos.y + 1.0, tz = pos.z;
@@ -176,10 +242,12 @@ export function createOnFoot(state, city, scene) {
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     const yaw = Math.atan2(dir.x, dir.z);
-    const fx = -Math.sin(yaw);
-    const fz = -Math.cos(yaw);
-    const rx = -fz;
-    const rz = fx;
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    // Screen-left of the camera forward: right is cross(forward, up) =
+    // (-fz, fx), so left is its negation (fz, -fx).
+    const rx = fz;
+    const rz = -fx;
 
     let mx = 0, mz = 0;
     if (input.up) { mx += fx; mz += fz; }

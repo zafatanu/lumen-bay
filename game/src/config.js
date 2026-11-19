@@ -120,8 +120,10 @@ export const SAVE_KEY = 'lumen-bay-save-v1';
 /** Default scene seed when the URL gives none; a fixed value keeps the demo reproducible. */
 export const SEED = 20261117;
 
-/** Player spawn point on the boulevard near Coral Beach (world coords). */
-export const SPAWN = { x: -120, z: -80 };
+/** Player spawn point on the boulevard near Coral Beach (world coords).
+ *  x sits on a road centreline (-289 + 2*74) so Rook, the parked starter car
+ *  (spawn.z + 4) and the spawn offsets all start on the road, not in a block. */
+export const SPAWN = { x: -141, z: -80 };
 
 /** Chase camera: orbit distance, height and how fast the intro glide settles. */
 export const CAMERA = {

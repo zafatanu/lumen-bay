@@ -264,7 +264,6 @@ function boot() {
   let radioStarted = false;
   let driftBank = 0;
   let menuAngle = 0.6;
-  const titleEl = document.getElementById('title-screen');
 
   /** Start the synth radio on the first real user gesture; browsers block the
    *  AudioContext until a key/mouse event, so this must sit in the input path. */
@@ -296,6 +295,19 @@ function boot() {
     return missionCatalog[i + 1].id;
   }
 
+  /** Snap the follow camera directly behind Rook (same back=3.4 / up=3.1 /
+   *  chest look as followCamera), so a new or continued run never lerps in
+   *  from wherever the menu orbit left the camera. */
+  function snapFollowCamera() {
+    const p = onFoot.getPosition();
+    const h = onFoot.heading;
+    camera.position.set(p.x - Math.sin(h) * 3.4, p.y + 3.1, p.z - Math.cos(h) * 3.4);
+    camera.userData.followLook = new THREE.Vector3(p.x, p.y + 1.0, p.z);
+    camera.lookAt(p.x, p.y + 1.0, p.z);
+    camera.fov = 55;
+    camera.updateProjectionMatrix();
+  }
+
   /** Start a brand-new run: reset state, unlock the first mission and open it. */
   function newGame() {
     state.reset();
@@ -306,6 +318,7 @@ function boot() {
     state.pushPopup('Ch.1 \u00b7 First Light');
     onFoot.setPosition(new THREE.Vector3(spawn.x, 0, spawn.z + 6), 0);
     onFoot.show();
+    snapFollowCamera();
     state.inCar = false;
     if (state.currentCar) { state.currentCar = null; state.speedKmh = 0; }
   }
@@ -317,6 +330,7 @@ function boot() {
       applySettings();
       onFoot.setPosition(new THREE.Vector3(state.lastSeenPos && state.lastSeenPos.x != null ? state.lastSeenPos.x : spawn.x - 5, 0, state.lastSeenPos && state.lastSeenPos.z != null ? state.lastSeenPos.z : spawn.z + 3), 0);
       onFoot.show();
+      snapFollowCamera();
     } else {
       newGame();
     }
@@ -394,12 +408,11 @@ function boot() {
     </div>`;
   }
 
-  /** Apply the boot settings before the first frame, and hide the title. */
+  /** Apply the boot settings before the first frame. */
   // Persisted settings (lumen-bay-settings) win over the state defaults so a
   // fresh boot keeps the player's last choices until a save overrides them.
   state.settings = Object.assign(state.settings, loadSettings());
   applySettings();
-  titleEl.style.display = 'none';
   setScreen('menu');
 
   /** Central screen switch: updates `screen` and shows/hides overlays. */
@@ -407,8 +420,8 @@ function boot() {
     screen = next;
     hideSub();
     if (next !== 'menu') { menuClose && menuClose(); menuClose = null; }
-    if (next === 'menu') { menuClose && menuClose(); titleEl.style.display = 'none'; menuRefresh(); }
-    else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); titleEl.style.display = 'none'; }
+    if (next === 'menu') { menuClose && menuClose(); menuRefresh(); }
+    else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); }
     else if (next === 'paused') { pause.open(); map.close(); }
     else if (next === 'map') { map.open(); pause.close(); }
   }
@@ -439,8 +452,7 @@ function boot() {
     if (screen === 'menu') { consumeNav(); return; }
     if (input.pressed('Enter') || input.pressed('Space')) {
       ensureRadio();
-      if (screen === 'title') setScreen('menu');
-      else if (screen === 'paused') setScreen('play');
+      if (screen === 'paused') setScreen('play');
     }
     if (input.pressed('Escape')) {
       ensureRadio();
@@ -596,7 +608,7 @@ function boot() {
       }
       if (input.consumeAny(['KeyF'])) exitCar();
     } else {
-      followCamera(camera, dt, onFoot.getPosition(), onFoot.heading);
+      followCamera(camera, dt, onFoot.getPosition(), onFoot.heading, city.colliders);
       onFoot.update(dt, snap, camera, combat.aimYaw, combat.aiming);
       traffic.update(dt, onFoot.getPosition(), 0);
       if (input.consumeAny(['KeyF'])) trySteal();
