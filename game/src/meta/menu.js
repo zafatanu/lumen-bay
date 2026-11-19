@@ -3,6 +3,7 @@
 // Buttons are real DOM <button>s AND keyboard navigable (Enter/Space).
 import { CHARACTERS } from '../missions/catalog.js';
 import { drawPortrait } from '../missions/characters.js';
+import { SAVE_KEY } from '../config.js';
 
 const SETTINGS_KEY = 'lumen-bay-settings';
 
@@ -48,7 +49,18 @@ export function createMenu(state, callbacks = {}) {
   const dom = document.getElementById('menu');
   if (!dom) return () => {};
 
-  const hasSave = !!state && !!state.missions && state.missions.length > 0;
+  // Read the persisted save once at build time. The menu is rebuilt on every
+  // return to the title, so the save read is fresh here; this is the source
+  // of truth for whether CONTINUE is available and what its summary shows.
+  let saved = null;
+  try {
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    if (raw) saved = JSON.parse(raw);
+  } catch {
+    saved = null;
+  }
+
+  const hasSave = !!saved;
 
   // --- keyboard nav: buttons get a roving .focused class; Enter/Space click. ---
   let focusIndex = 0;
@@ -73,8 +85,20 @@ export function createMenu(state, callbacks = {}) {
   const row = (label, value) =>
     `<div class="menu-row"><span class="mk">${label}</span><span class="mv">${value}</span></div>`;
 
-  const saveSummary = hasSave && state
-    ? row('SAVE', `Ch.${currentChapter(state)} \u00b7 $${Number(state.money).toLocaleString()} \u00b7 Day ${state.day} \u00b7 ${state.formatClock ? state.formatClock() : ''}`)
+  const saveSummary = hasSave
+    ? (() => {
+        // Format the save's clock the same way state.formatClock() does:
+        // hh:mm from clockMinutes (0..minutesPerDay). Mirror it here because
+        // the save is a plain object without the state method.
+        let clock = '';
+        if (saved && saved.clockMinutes != null) {
+          const mins = Math.floor(Number(saved.clockMinutes)) % (24 * 60);
+          const hh = String(Math.floor(mins / 60)).padStart(2, '0');
+          const mm = String(mins % 60).padStart(2, '0');
+          clock = ` \u00b7 ${hh}:${mm}`;
+        }
+        return row('SAVE', `Ch.${currentChapter(saved)} \u00b7 $${Number(saved.money || 0).toLocaleString()} \u00b7 Day ${saved.day || 1}${clock}`);
+      })()
     : '';
 
   dom.innerHTML = `

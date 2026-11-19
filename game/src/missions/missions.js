@@ -150,9 +150,9 @@ export function createMissions(state, world, hooks = {}) {
   /** Mission finished: pay out, unlock the next chapter itch, save. */
   function completeMission() {
     const def = m.def;
-    if (hooks.onComplete) hooks.onComplete(def);
     if (hooks.unlockNext) hooks.unlockNext(def);
     clearMissionState();
+    if (hooks.onComplete) hooks.onComplete(def);
   }
 
   /** Poll one frame of the mission: a timed stage counts down; each stage
