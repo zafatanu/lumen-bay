@@ -37,7 +37,7 @@ function driveSnap() {
 function shootSnap(fire) {
   return { up: false, down: false, left: false, right: false, sprint: false,
     handbrake: false, interact: false, jump: false, honk: false, recover: false,
-    weapon: 3, mouseX: 400, mouseY: 240, mouseDown: fire };
+    weapon: 3, mouseX: 640, mouseY: 400, mouseDown: fire };
 }
 
 // --shots-helpers-- marker: helpers append below
