@@ -80,17 +80,23 @@ export function createHud(state, dom, opts = {}) {
     return best.name;
   }
 
-  /** Draw the road grid as light lines over a sea-tinted backing. */
+  /** Draw the road grid as cased streets — dark under-stroke + pale centre
+   *  line over a sea-tinted backing — so the minimap reads as streets, not
+   *  faint scratches. Size, position and blips are unchanged. */
   function drawGrid() {
     mmCtx.fillStyle = '#0b2a38';
     mmCtx.fillRect(0, 0, MINIMAP, MINIMAP);
-    mmCtx.strokeStyle = 'rgba(150,210,235,0.55)';
-    mmCtx.lineWidth = 2;
-    const step = Math.round((WORLD.block + WORLD.road) * (MINIMAP / WORLD_W));
-    for (let i = 0; i <= WORLD.blocks; i += 1) {
-      const p = toPx(-WORLD_W / 2 + i * (WORLD.block + WORLD.road), 0).px;
-      mmCtx.beginPath(); mmCtx.moveTo(p, 0); mmCtx.lineTo(p, MINIMAP); mmCtx.stroke();
-      mmCtx.beginPath(); mmCtx.moveTo(0, p); mmCtx.lineTo(MINIMAP, p); mmCtx.stroke();
+    for (const pass of [
+      { style: 'rgba(18,24,40,0.9)', width: 4.5 },
+      { style: 'rgba(150,210,235,0.7)', width: 2 },
+    ]) {
+      mmCtx.strokeStyle = pass.style;
+      mmCtx.lineWidth = pass.width;
+      for (let i = 0; i <= WORLD.blocks; i += 1) {
+        const p = toPx(-WORLD_W / 2 + i * (WORLD.block + WORLD.road), 0).px;
+        mmCtx.beginPath(); mmCtx.moveTo(p, 0); mmCtx.lineTo(p, MINIMAP); mmCtx.stroke();
+        mmCtx.beginPath(); mmCtx.moveTo(0, p); mmCtx.lineTo(MINIMAP, p); mmCtx.stroke();
+      }
     }
     mmCtx.strokeStyle = '#2ae0c0';
     mmCtx.strokeRect(0.5, 0.5, MINIMAP - 1, MINIMAP - 1);
