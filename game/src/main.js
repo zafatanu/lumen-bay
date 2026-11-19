@@ -104,6 +104,10 @@ function boot() {
     // Live job-giver markers for the minimap blips (defined below; the
     // getter is only called once the frame loop runs).
     getMarkers: () => missionMarkers,
+    // Live conch-shell handles from placeShells() ({mesh,pos,taken}); the
+    // minimap/map plot the real catalog spots and drop the taken ones.
+    // Same late-binding pattern as getMarkers — shells is defined below.
+    getShells: () => shells,
   });
 
   // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
@@ -454,7 +458,7 @@ function boot() {
   const map = createMap(state, () => {
     const p = state.inCar && driver.car ? driver.car.position : onFoot.getPosition();
     return { x: p.x, z: p.z };
-  }, police, () => missionMarkers);
+  }, police, () => missionMarkers, () => shells);
   const pause = createPause(state, {
     onResume: () => setScreen('play'),
     onRestart: () => { if (state.currentMission) mission.start(state.currentMission); setScreen('play'); },
@@ -527,6 +531,13 @@ function boot() {
   function setScreen(next) {
     screen = next;
     hideSub();
+    // Ghosting fix: the menu/map/pause overlays are semi-transparent, so the
+    // live HUD underneath bleeds through them. Hide every HUD panel (plus the
+    // crosshair and popups) via one class whenever we are not in play; the
+    // overlays themselves are .fullscreen siblings, so they stay visible.
+    // hud.update() keeps running untouched — removing the class on return to
+    // play brings the whole HUD back on the very next frame.
+    hudEl.classList.toggle('hud-hidden', next !== 'play');
     // Leaving play freezes the sim: silence the continuous audio layers so
     // the engine/siren never drone under the menu, map or pause overlay.
     if (next !== 'play') sfx.stopAll();

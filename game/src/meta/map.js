@@ -10,9 +10,11 @@ const WORLD_W = WORLD.total; // island span in metres
 /** Build the full map screen inside #map-screen. Returns { open, close }.
  *  `player` -> {x,z} current world position for the player marker;
  *  `police` -> optional { units() } provider for live police blips;
- *  `markers` -> () => job-giver marker list ({pos,label,kind}) from main.js.
+ *  `markers` -> () => job-giver marker list ({pos,label,kind}) from main.js;
+ *  `getShells` -> () => live conch handles ({mesh,pos,taken}, catalog SHELLS
+ *  order) from placeShells(), so blips mark exactly the untaken shells.
  */
-export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null, markers = () => []) {
+export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null, markers = () => [], getShells = () => []) {
   const dom = document.getElementById('map-screen');
   if (!dom) return { open: () => {}, close: () => {} };
 
@@ -285,12 +287,15 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null,
   /** Draw the live markers over the island: shells, job givers, mission
    *  target, police. */
   function drawBlips(ctx) {
-    // Conch shells the player has NOT yet found: amber dots.
-    const found = state.shells || 0;
-    let shown = 0;
-    for (const s of SHELLS) {
-      if (shown >= found) blip(ctx, s.x, s.z, '#ffd9a0', 3.4);
-      else shown += 1;
+    // Conch shells the player has NOT yet taken: amber dots at the real
+    // catalog spots. The live handles carry the taken flags (placeShells()
+    // order === SHELLS order), so exactly the untaken shells are drawn —
+    // never the first-N of the catalog, which goes wrong the moment
+    // collection is non-sequential.
+    const shellHandles = getShells();
+    for (let i = 0; i < SHELLS.length; i += 1) {
+      if (shellHandles[i] && shellHandles[i].taken) continue;
+      blip(ctx, SHELLS[i].x, SHELLS[i].z, '#ffd9a0', 3.4);
     }
     // Job-giver markers: gold diamond + name for the story mission, teal
     // dots + names for taxi / taco / race — the same colours as the 3D

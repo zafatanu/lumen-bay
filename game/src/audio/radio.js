@@ -338,5 +338,12 @@ export function createRadio() {
     if (master) master.gain.value = muted ? 0 : BASE_GAIN * level;
   }
 
-  return { start, stop, next, current, setMuted };
+  /** True once start() has spun the sequencer up (first user gesture) and
+   *  stop() hasn't torn it down. The HUD uses this to show OFF AIR honestly
+   *  before the radio exists — current() alone always returns a station. */
+  function isRunning() {
+    return running;
+  }
+
+  return { start, stop, next, current, setMuted, isRunning };
 }

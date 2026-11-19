@@ -5,6 +5,7 @@
 // and all interaction lives in the menu/map/pause overlays. No network.
 import { WORLD, DISTRICTS, CAR, POLICE } from '../config.js';
 import { WEAPONS } from '../combat/weapons.js';
+import { SHELLS, MISSIONS } from '../missions/catalog.js';
 
 const MINIMAP = 192;          // canvas px square
 const WORLD_W = WORLD.total;  // island span in metres
@@ -20,6 +21,10 @@ export function createHud(state, dom, opts = {}) {
   const police = opts.police;
   // Live job-giver markers from main.js ({pos,label,kind}); empty if absent.
   const getMarkers = opts.getMarkers || (() => []);
+  // Live conch-shell handles from main.js (placeShells(): {mesh,pos,taken},
+  // in catalog SHELLS order); empty if absent. The minimap plots the real
+  // catalog coordinates and skips the handles flagged taken.
+  const getShells = opts.getShells || (() => []);
   // Accumulated display time for the pulsing story-marker blip.
   let hudTime = 0;
 
@@ -174,12 +179,14 @@ export function createHud(state, dom, opts = {}) {
     if (!mmCtx) return;
     const p = player();
     drawGrid();
-    // Collectible shells: amber dots, once the player has found a few.
-    const found = state.shells || 0;
-    for (let i = 0; i < Math.min(6, found); i += 1) {
-      const sx = -WORLD_W / 2 + (i * 91) % WORLD_W;
-      const sz = -WORLD_W / 2 + (i * 173) % WORLD_W;
-      blip(sx, sz, '#ffd9a0');
+    // Collectible shells: amber dots at the REAL catalog spots (SHELLS from
+    // missions/catalog.js — the same coordinates placeShells() meshes sit at).
+    // A shell drops off the minimap once its live handle is flagged taken,
+    // so the blips always match what is still out on the island.
+    const shellHandles = getShells();
+    for (let i = 0; i < SHELLS.length; i += 1) {
+      if (shellHandles[i] && shellHandles[i].taken) continue;
+      blip(SHELLS[i].x, SHELLS[i].z, '#ffd9a0');
     }
     // Job-giver markers: pulsing gold diamond for the story mission, teal
     // dots for the taxi / taco / race givers (same colours as the 3D signs).
@@ -230,7 +237,18 @@ export function createHud(state, dom, opts = {}) {
     if (missionObj) missionObj.textContent = obj;
     if (missionTimer) missionTimer.textContent = state.missionTimer != null ? `\u23F1 ${Math.ceil(state.missionTimer)}s` : '';
     if (missionStage) missionStage.textContent = state.missionStage || '';
-    if (missionNext) missionNext.textContent = state.missionStage ? `NEXT \u00b7 ${obj}` : '';
+    // NEXT row: the FOLLOWING stage's objective, read straight from the
+    // catalog (one short line per stage). state.missionStage is "STAGE n/N",
+    // so stages[n] is the next one (0-based). On the final stage — or when
+    // the active id isn't a catalog mission — the row stays empty; it never
+    // repeats the current objective line above it.
+    if (missionNext) {
+      let nextText = '';
+      const def = MISSIONS.find((mm) => mm.id === active);
+      const stageNo = parseInt(String(state.missionStage || '').replace(/^STAGE\s*/i, ''), 10);
+      if (def && Number.isFinite(stageNo) && def.stages[stageNo]) nextText = def.stages[stageNo].text;
+      missionNext.textContent = nextText ? `NEXT \u00b7 ${nextText}` : '';
+    }
   }
 
   /** Mid-left police roster: each unit name, distance in m, and AI state. */
@@ -354,10 +372,13 @@ export function createHud(state, dom, opts = {}) {
 
   /** Radio widget: station + frequency + current track (N cycles). Reads the
    *  live station from state (set by main.js from radio.current()) so the HUD
-   *  never depends on the radio object being wired up. */
+   *  never depends on the radio object being wired up. The radio.current()
+   *  fallback only applies once the synth is actually running — before the
+   *  first user gesture the widget honestly reads OFF AIR / press N. */
   function updateRadio() {
     if (!radioEl) return;
-    const cur = radio ? radio.current() : null;
+    const live = radio && typeof radio.isRunning === 'function' && radio.isRunning();
+    const cur = live ? radio.current() : null;
     const st = (state.radioStation || (cur ? `${cur.station} \u00b7 ${cur.freq} MHz` : ''));
     const tr = (state.radioTrack || (cur ? cur.track : ''));
     if (!st && !tr) {
