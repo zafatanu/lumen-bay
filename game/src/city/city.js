@@ -2,7 +2,7 @@
 // a coastal boardwalk, beach and ocean, palms, street props, and a marina
 // ferris wheel. Everything is built procedurally from a seeded rng.
 import * as THREE from 'three';
-import { WORLD, COAST, SEA, DISTRICTS, SPAWN } from '../config.js';
+import { WORLD, COAST, SEA, DISTRICTS, SPAWN, SUNSET } from '../config.js';
 import { makeFacadeTexture } from '../render/scene.js';
 import { rand, randInt, pick } from '../random.js';
 
@@ -20,6 +20,52 @@ const GEO = {
 const mat = (color, emissive = 0x000000) => new THREE.MeshStandardMaterial({
   color, emissive, roughness: 0.9, metalness: 0.05,
 });
+
+/** Darken a '#rrggbb' colour by factor f for painted deco trim. */
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return (r << 16) | (g << 8) | b;
+}
+
+// Painted shop signs (no neon): a small shared set of canvas textures, built
+// once and reused across the showcase streets. LUMEN BAY's own words only.
+const SIGN_WORDS = ['HOTEL', 'CAFE', 'SURF', 'OCEAN', 'LUMEN', 'BAY', 'TACOS',
+  'RECORDS', 'MARINA', 'GULLS', 'ROOK', 'SUNSET'];
+const SIGN_BG = ['#2a2438', '#3a2a2e', '#22303a', '#332a3f'];
+const signTexCache = new Map();
+function signTexture(word) {
+  if (signTexCache.has(word)) return signTexCache.get(word);
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 64;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = SIGN_BG[word.length % SIGN_BG.length];
+  ctx.fillRect(0, 0, 256, 64);
+  ctx.strokeStyle = 'rgba(255,214,150,0.85)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(5, 5, 246, 54);
+  ctx.fillStyle = '#ffd9a0';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(word, 128, 34);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  signTexCache.set(word, tex);
+  return tex;
+}
+/** A sign board hung flat on a facade; warm paint, faint glow, never neon. */
+function signBoard(word, width) {
+  const m = new THREE.Mesh(GEO.box, new THREE.MeshStandardMaterial({
+    map: signTexture(word), roughness: 0.8, metalness: 0.05,
+    emissive: 0xffb26b, emissiveIntensity: 0.12,
+  }));
+  m.scale.set(width, width * 0.25, 0.16);
+  return m;
+}
 
 /** World x of the west (coastal) edge of the island grid. */
 function westEdge() {
@@ -73,14 +119,33 @@ function buildGround(group) {
   return ground;
 }
 
-/** The ocean plane, laid flat and slightly sunken, plus the beach sand mound. */
+/** The ocean plane, laid flat and slightly sunken, plus the beach sand mound
+ *  and a cheap additive sun-path aligned with the low sun's bearing. */
 function buildWater(group) {
   const ocean = new THREE.Mesh(GEO.box, new THREE.MeshStandardMaterial({
-    color: 0x2a6a8a, roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.9,
+    color: 0x275f80, roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.9,
   }));
   ocean.scale.set(SEA.extent * 2, 1, WORLD.total * 1.6);
   ocean.position.set(westEdge() - SEA.extent, SEA.level, 0);
   group.add(ocean);
+
+  // Sun-path: two additive strips on the water along the sun bearing (the
+  // same SUNSET.sunPos the sky dome and key light use). Two meshes, no
+  // shaders — the cheapest possible glint lane toward the horizon.
+  const sp = SUNSET.sunPos;
+  const bearing = Math.atan2(sp.x, sp.z);
+  const pathMat = (opacity) => new THREE.MeshBasicMaterial({
+    color: SUNSET.sunGlow, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const drift = SEA.extent * 0.6 * (sp.z / Math.abs(sp.x)); // z drift along the bearing
+  for (const [width, opacity] of [[18, 0.2], [7, 0.3]]) {
+    const path = new THREE.Mesh(GEO.box, pathMat(opacity));
+    path.scale.set(width, 0.05, SEA.extent * 1.9);
+    path.rotation.y = bearing;
+    path.position.set(westEdge() - SEA.extent * 0.6, SEA.level + 0.56, drift);
+    group.add(path);
+  }
 
   const sand = new THREE.Mesh(GEO.box, mat(0xe7d3a6));
   sand.scale.set(COAST.beachWidth + COAST.boardwalkWidth, 1, WORLD.total * 1.6);
@@ -89,8 +154,9 @@ function buildWater(group) {
   group.add(sand);
 }
 
-/** Boardwalk planks running the full coastal length. */
-function buildBoardwalk(group) {
+/** Boardwalk planks running the full coastal length, with an ocean-side
+ *  railing, warm lamp heads and planters — the screenshot-facing promenade. */
+function buildBoardwalk(group, rng) {
   const len = WORLD.total * 1.4;
   const plankMat = mat(0xc98f5e);
   const count = 46;
@@ -101,40 +167,119 @@ function buildBoardwalk(group) {
     plank.position.set(westEdge() + COAST.boardwalkWidth / 2, 0.06, z);
     group.add(plank);
   }
-}
 
-/** Palms lining the boulevard and beach: cylinder trunk + cone fronds. */
-function buildPalms(group, rng) {
-  const trunkMat = mat(0x7a5230);
-  const frondMat = mat(0x3f7a3f);
-  const spacing = 22;
-  for (let z = -WORLD.total / 2 + 8; z < WORLD.total / 2 - 8; z += spacing) {
-    const x = westEdge() + COAST.boulevardWidth + rand(rng, 0, 6);
-    const p = new THREE.Group();
-    const trunk = new THREE.Mesh(GEO.cylinder, trunkMat);
-    const h = 3.5 + rand(rng, 0, 1.6);
-    trunk.scale.set(0.28, h, 0.28);
-    trunk.position.y = h / 2;
-    trunk.rotation.z = rand(rng, -0.18, 0.18);
-    p.add(trunk);
-    for (let f = 0; f < 5; f += 1) {
-      const frond = new THREE.Mesh(GEO.cone, frondMat);
-      frond.scale.set(1.1, 0.9 + rng() * 0.9, 0.9);
-      frond.position.y = h + 0.3;
-      const ang = (f / 5) * Math.PI * 2 + rng();
-      frond.rotation.x = 1.5;
-      frond.rotation.y = ang;
-      p.add(frond);
-    }
-    p.position.set(x, 0, z + rand(rng, -4, 4));
-    group.add(p);
+  // Low concrete seawall on the ocean side of the boardwalk, rising from
+  // the sand to just under the railing.
+  const seaWall = new THREE.Mesh(GEO.box, mat(0xb9b2a4));
+  seaWall.scale.set(0.8, 1.0, len);
+  seaWall.position.set(westEdge() - 0.5, 0.1, 0);
+  group.add(seaWall);
+
+  // Railing on the ocean edge: posts + one continuous top rail.
+  const railMat = mat(0x8a6b4a);
+  const railX = westEdge() + 0.4;  for (let z = -len / 2; z <= len / 2; z += 7) {
+    const post = new THREE.Mesh(GEO.box, railMat);
+    post.scale.set(0.12, 1.0, 0.12);
+    post.position.set(railX, 0.6, z);
+    group.add(post);
+  }
+  const rail = new THREE.Mesh(GEO.box, railMat);
+  rail.scale.set(0.1, 0.09, len);
+  rail.position.set(railX, 1.1, 0);
+  group.add(rail);
+
+  // Selective warm lamps along the promenade (every ~60m, not a light strip).
+  const poleMat = mat(0x3a3f46);
+  const headMat = new THREE.MeshStandardMaterial({
+    color: 0xffd9a0, emissive: 0xffb26b, emissiveIntensity: 1.1,
+  });
+  for (let z = -len / 2 + 24; z < len / 2 - 12; z += 60) {
+    const pole = new THREE.Mesh(GEO.cylinder, poleMat);
+    pole.scale.set(0.1, 3.6, 0.1);
+    pole.position.set(westEdge() + COAST.boardwalkWidth - 0.6, 1.8, z + rand(rng, -4, 4));
+    group.add(pole);
+    const head = new THREE.Mesh(GEO.sphere, headMat);
+    head.scale.set(0.55, 0.55, 0.55);
+    head.position.set(pole.position.x, 3.75, pole.position.z);
+    group.add(head);
+  }
+
+  // Planters on the inland edge: terracotta box + a clipped shrub.
+  const potMat = mat(0xb87a5a);
+  const shrubMat = mat(0x4f7a4a);
+  for (let z = -len / 2 + 14; z < len / 2 - 10; z += rand(rng, 24, 34)) {
+    const pot = new THREE.Mesh(GEO.box, potMat);
+    pot.scale.set(1.4, 0.7, 1.4);
+    pot.position.set(westEdge() + COAST.boardwalkWidth + 0.9, 0.35, z);
+    group.add(pot);
+    const shrub = new THREE.Mesh(GEO.sphere, shrubMat);
+    shrub.scale.set(1.3, 0.9, 1.3);
+    shrub.position.set(pot.position.x, 1.0, z);
+    group.add(shrub);
   }
 }
 
-/** A single low-poly building with a canvas facade, placed with given scale. */
-function buildBuilding(group, district, rng, x, z, w, d) {
+/** One palm: leaning cylinder trunk + a fan of cone fronds. */
+function makePalm(rng, trunkMat, frondMat, h) {
+  const p = new THREE.Group();
+  const trunk = new THREE.Mesh(GEO.cylinder, trunkMat);
+  trunk.scale.set(0.28, h, 0.28);
+  trunk.position.y = h / 2;
+  trunk.rotation.z = rand(rng, -0.18, 0.18);
+  p.add(trunk);
+  for (let f = 0; f < 5; f += 1) {
+    const frond = new THREE.Mesh(GEO.cone, frondMat);
+    frond.scale.set(1.1, 0.9 + rng() * 0.9, 0.9);
+    frond.position.y = h + 0.3;
+    const ang = (f / 5) * Math.PI * 2 + rng();
+    frond.rotation.x = 1.5;
+    frond.rotation.y = ang;
+    p.add(frond);
+  }
+  return p;
+}
+
+/** Palms in UNEVEN clusters: a boulevard row with random gaps and doubled-up
+ *  trunks, plus a sparser beach row out on the sand. No metronome spacing. */
+function buildPalms(group, rng) {
+  const trunkMat = mat(0x7a5230);
+  const frondMat = mat(0x3f7a3f);
+
+  // Boulevard row: clusters of 1-3 with irregular gaps.
+  let z = -WORLD.total / 2 + 10;
+  while (z < WORLD.total / 2 - 10) {
+    const n = 1 + (rng() < 0.45 ? 1 : 0) + (rng() < 0.2 ? 1 : 0);
+    for (let i = 0; i < n; i += 1) {
+      const x = westEdge() + COAST.boulevardWidth + rand(rng, 0, 6);
+      const p = makePalm(rng, trunkMat, frondMat, 3.5 + rand(rng, 0, 1.6));
+      p.position.set(x + rand(rng, -1.5, 1.5), 0, z + rand(rng, -3, 3));
+      group.add(p);
+    }
+    z += rand(rng, 13, 34);
+  }
+
+  // Beach row: taller palms out on the sand, wider irregular gaps.
+  z = -WORLD.total / 2 + 20;
+  while (z < WORLD.total / 2 - 16) {
+    const n = rng() < 0.35 ? 2 : 1;
+    for (let i = 0; i < n; i += 1) {
+      const p = makePalm(rng, trunkMat, frondMat, 4.5 + rand(rng, 0, 1.8));
+      p.position.set(westEdge() - rand(rng, 6, 30), SEA.sandLevel, z + rand(rng, -5, 5));
+      group.add(p);
+    }
+    z += rand(rng, 30, 62);
+  }
+}
+
+/** A single low-poly building with a canvas facade, placed with given scale.
+ *  (nx, nz) is the outward street-facing normal, so awnings, balconies and
+ *  signs land on the face the street sees. Deco districts get silhouette
+ *  dressing: corner fins, a stepped setback crown, a canopy skirt, balconies,
+ *  a painted sign and extra roof equipment. */
+function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1) {
+  const deco = district.deco === true;
   const floors = Math.max(2, Math.round(district.maxH / 3));
-  const tex = makeFacadeTexture(district.palette, floors, rng);
+  const tex = makeFacadeTexture(district.palette, floors, rng, deco);
   const roof = pick(rng, district.palette);
   const h = rand(rng, district.minH, district.maxH);
   const mesh = new THREE.Mesh(GEO.box, new THREE.MeshStandardMaterial({
@@ -158,6 +303,110 @@ function buildBuilding(group, district, rng, x, z, w, d) {
     ac.position.set(x + rand(rng, -w / 4, w / 4), h + 1.1, z + rand(rng, -d / 4, d / 4));
     group.add(ac);
   }
+
+  if (!deco) return mesh;
+
+  const trimMat = mat(shade(roof, 0.72));
+  const darkMat = mat(shade(roof, 0.55));
+
+  // Stepped setback crown: a smaller upper storey, slightly off-centre, so
+  // the roofline steps instead of ending in a flat slab.
+  if (rng() < 0.7) {
+    const cw = w * (0.42 + rng() * 0.2);
+    const cd = d * (0.42 + rng() * 0.2);
+    const ch = 1.6 + rng() * 2.4;
+    const crown = new THREE.Mesh(GEO.box, trimMat);
+    crown.scale.set(cw, ch, cd);
+    crown.position.set(x + rand(rng, -w * 0.12, w * 0.12), h + 0.8 + ch / 2, z + rand(rng, -d * 0.12, d * 0.12));
+    group.add(crown);
+    // A slim fin on top of the crown — the deco spike on the skyline.
+    const spike = new THREE.Mesh(GEO.box, darkMat);
+    spike.scale.set(0.5, 1.6 + rng() * 1.4, 0.5);
+    spike.position.set(crown.position.x, h + 0.8 + ch + spike.scale.y / 2, crown.position.z);
+    group.add(spike);
+  }
+
+  // Vertical fins at the two outward corners: full-height painted strips
+  // that break the flat facade plane from every street angle.
+  const finH = h * 0.96;
+  for (const s of [-1, 1]) {
+    const fin = new THREE.Mesh(GEO.box, trimMat);
+    if (nz !== 0) {
+      fin.scale.set(0.55, finH, 0.35);
+      fin.position.set(x + s * (w / 2 - 0.3), finH / 2, z + nz * (d / 2 + 0.12));
+    } else {
+      fin.scale.set(0.35, finH, 0.55);
+      fin.position.set(x + nx * (w / 2 + 0.12), finH / 2, z + s * (d / 2 - 0.3));
+    }
+    group.add(fin);
+  }
+
+  // Canopy skirt over the ground-floor shopfront, slightly sloped.
+  const awn = new THREE.Mesh(GEO.box, mat(shade(roof, 0.6)));
+  if (nz !== 0) {
+    awn.scale.set(w * 0.72, 0.18, 1.9);
+    awn.position.set(x, 3.4, z + nz * (d / 2 + 0.85));
+    awn.rotation.x = nz * 0.1;
+  } else {
+    awn.scale.set(1.9, 0.18, d * 0.72);
+    awn.position.set(x + nx * (w / 2 + 0.85), 3.4, z);
+    awn.rotation.z = -nx * 0.1;
+  }
+  group.add(awn);
+
+  // Balcony slabs on the outward face, with a thin rail on the outer edge.
+  if (rng() < 0.55) {
+    const nBal = 1 + (rng() < 0.5 ? 1 : 0);
+    for (let b = 0; b < nBal; b += 1) {
+      const by = h * (0.42 + b * 0.28);
+      const slab = new THREE.Mesh(GEO.box, trimMat);
+      const rail = new THREE.Mesh(GEO.box, darkMat);
+      if (nz !== 0) {
+        slab.scale.set(w * 0.42, 0.22, 1.15);
+        slab.position.set(x + rand(rng, -w * 0.2, w * 0.2), by, z + nz * (d / 2 + 0.55));
+        rail.scale.set(w * 0.42, 0.7, 0.08);
+        rail.position.set(slab.position.x, by + 0.45, z + nz * (d / 2 + 1.08));
+      } else {
+        slab.scale.set(1.15, 0.22, d * 0.42);
+        slab.position.set(x + nx * (w / 2 + 0.55), by, z + rand(rng, -d * 0.2, d * 0.2));
+        rail.scale.set(0.08, 0.7, d * 0.42);
+        rail.position.set(x + nx * (w / 2 + 1.08), by + 0.45, slab.position.z);
+      }
+      group.add(slab);
+      group.add(rail);
+    }
+  }
+
+  // One painted sign board on the outward face — warm paint, never neon.
+  if (rng() < 0.45) {
+    const sign = signBoard(pick(rng, SIGN_WORDS), 5 + rng() * 3);
+    if (nz !== 0) {
+      sign.position.set(x + rand(rng, -w * 0.15, w * 0.15), 5.6 + rng() * 2, z + nz * (d / 2 + 0.18));
+    } else {
+      sign.rotation.y = Math.PI / 2;
+      sign.position.set(x + nx * (w / 2 + 0.18), 5.6 + rng() * 2, z + rand(rng, -d * 0.15, d * 0.15));
+    }
+    group.add(sign);
+  }
+
+  // Extra roof furniture on deco roofs: a vent stack and, sometimes, a
+  // cylindrical water tank with a cone cap — more silhouette variety up top.
+  if (rng() < 0.5) {
+    const vent = new THREE.Mesh(GEO.cylinder, mat(0x7a7f88));
+    vent.scale.set(0.5, 1.0, 0.5);
+    vent.position.set(x + rand(rng, -w / 4, w / 4), h + 1.3, z + rand(rng, -d / 4, d / 4));
+    group.add(vent);
+  }
+  if (rng() < 0.35) {
+    const tank = new THREE.Mesh(GEO.cylinder, mat(0x9a7a5a));
+    tank.scale.set(1.5, 2.0, 1.5);
+    tank.position.set(x + rand(rng, -w / 4, w / 4), h + 1.8, z + rand(rng, -d / 4, d / 4));
+    group.add(tank);
+    const cap = new THREE.Mesh(GEO.cone, mat(0x7a5a42));
+    cap.scale.set(1.6, 0.9, 1.6);
+    cap.position.set(tank.position.x, h + 3.2, tank.position.z);
+    group.add(cap);
+  }
   return mesh;
 }
 
@@ -166,10 +415,10 @@ function buildBlock(group, district, rng, bx, bz) {
   const lot = WORLD.block;
   const inset = 2;
   const faces = [
-    { x: 0, z: lot * 0.28, w: lot - inset * 2, d: lot * 0.26 },
-    { x: 0, z: -lot * 0.28, w: lot - inset * 2, d: lot * 0.26 },
-    { x: lot * 0.28, z: 0, w: lot * 0.26, d: lot - inset * 2 },
-    { x: -lot * 0.28, z: 0, w: lot * 0.26, d: lot - inset * 2 },
+    { x: 0, z: lot * 0.28, w: lot - inset * 2, d: lot * 0.26, nx: 0, nz: 1 },
+    { x: 0, z: -lot * 0.28, w: lot - inset * 2, d: lot * 0.26, nx: 0, nz: -1 },
+    { x: lot * 0.28, z: 0, w: lot * 0.26, d: lot - inset * 2, nx: 1, nz: 0 },
+    { x: -lot * 0.28, z: 0, w: lot * 0.26, d: lot - inset * 2, nx: -1, nz: 0 },
   ];
   for (let i = 0; i < faces.length; i += 1) {
     const f = faces[i];
@@ -184,7 +433,7 @@ function buildBlock(group, district, rng, bx, bz) {
       const pz = horizontal ? 0 : off;
       const pw = horizontal ? piece : f.w;
       const pd = horizontal ? f.d : piece;
-      buildBuilding(group, district, rng, bx + f.x + px, bz + f.z + pz, pw, pd);
+      buildBuilding(group, district, rng, bx + f.x + px, bz + f.z + pz, pw, pd, f.nx, f.nz);
     }
   }
 }
@@ -371,6 +620,46 @@ function buildProps(group, rng) {
   }
 }
 
+/** Screenshot-facing street props on the first coastal road: parked cars on
+ *  the west kerb, power poles on the east kerb. Dressing only — no gameplay
+ *  effect, no colliders, nothing moves. */
+function buildBoulevardProps(group, rng) {
+  const roadX = westEdge() + WORLD.block + WORLD.road; // first N-S road centre
+  const carCols = [0xc94f4f, 0x4f7dc9, 0xe0b23b, 0x7a8a99, 0xd8d3c8, 0x5a9a6a, 0x8a6fb0];
+  // Parked cars along the west kerb, with uneven gaps and flipped headings.
+  let z = -WORLD.total / 2 + 30;
+  while (z < WORLD.total / 2 - 30) {
+    if (rng() < 0.7) {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(GEO.box, mat(pick(rng, carCols), 0x18101c));
+      body.scale.set(1.9, 0.75, 4.4);
+      body.position.y = 0.55;
+      car.add(body);
+      const cabin = new THREE.Mesh(GEO.box, mat(0x2a3138, 0x0a0c10));
+      cabin.scale.set(1.7, 0.6, 2.2);
+      cabin.position.set(0, 1.2, -0.2);
+      car.add(cabin);
+      car.position.set(roadX - WORLD.road / 2 + 1.6, 0, z + rand(rng, -2, 2));
+      car.rotation.y = (rng() < 0.5 ? 0 : Math.PI) + rand(rng, -0.06, 0.06);
+      group.add(car);
+    }
+    z += rand(rng, 12, 26);
+  }
+  // Power poles on the east kerb of the same road, uneven gaps.
+  const poleMat = mat(0x5a4632);
+  for (let pz = -WORLD.total / 2 + 20; pz < WORLD.total / 2 - 20; pz += 44) {
+    if (rng() < 0.25) continue;
+    const pole = new THREE.Mesh(GEO.cylinder, poleMat);
+    pole.scale.set(0.22, 7.5, 0.22);
+    pole.position.set(roadX + WORLD.road / 2 - 1.2, 3.75, pz + rand(rng, -3, 3));
+    group.add(pole);
+    const arm = new THREE.Mesh(GEO.box, poleMat);
+    arm.scale.set(0.18, 0.18, 2.4);
+    arm.position.set(pole.position.x, 6.9, pole.position.z);
+    group.add(arm);
+  }
+}
+
 /** Main entry: build the whole island into a THREE.Group. */
 export function createCity(scene, rng) {
   const group = new THREE.Group();
@@ -378,8 +667,9 @@ export function createCity(scene, rng) {
 
   buildGround(group);
   buildWater(group);
-  buildBoardwalk(group);
+  buildBoardwalk(group, rng);
   buildPalms(group, rng);
+  buildBoulevardProps(group, rng);
 
   // Walk the 8x8 grid, assigning each block to the nearest district.
   const districts = new Map();

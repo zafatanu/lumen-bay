@@ -3,9 +3,20 @@
 import * as THREE from 'three';
 import { SUNSET, WORLD } from '../config.js';
 
+/** Darken a '#rrggbb' colour by factor f (0..1) for painted trim/shadows. */
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return `rgb(${r},${g},${b})`;
+}
+
 /** Shared helper: paint a building facade (windows grid) onto a canvas texture.
- *  Deterministic: pass the city's seeded rng so the same city reproduces exactly. */
-export function makeFacadeTexture(palette, floors, rng) {
+ *  Deterministic: pass the city's seeded rng so the same city reproduces exactly.
+ *  deco=true adds art-deco pilasters + floor bands for the showcase districts.
+ *  Windows are SELECTIVE: roughly one in five lit warm, the rest dark glass. */
+export function makeFacadeTexture(palette, floors, rng, deco = false) {
   const w = 256;
   const h = 512;
   const cv = document.createElement('canvas');
@@ -19,14 +30,35 @@ export function makeFacadeTexture(palette, floors, rng) {
   const rows = Math.max(4, floors);
   const winW = w / (cols * 3);
   const winH = h / (rows * 4);
-  const lightP = 0.25;
+
+  if (deco) {
+    // Vertical pilasters between the window bays and a slim spandrel band
+    // under each floor: pastel art-deco rhythm, painted not neon.
+    ctx.fillStyle = shade(wall, 0.82);
+    for (let c = 0; c <= cols; c += 1) {
+      const x = w * (c + 0.5) / (cols + 1);
+      ctx.fillRect(x - 3, 0, 6, h);
+    }
+    ctx.fillStyle = shade(wall, 0.9);
+    for (let r = 1; r < rows; r += 1) {
+      const y = h * (r + 0.5) / (rows + 1);
+      ctx.fillRect(0, y, w, 3);
+    }
+  }
+
+  const lightP = 0.22;
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
       const x = w * (c + 1) / (cols + 1) - winW / 2;
       const y = h * (r + 1) / (rows + 1) - winH / 2;
       const lit = rng() < lightP;
-      ctx.fillStyle = lit ? '#ffd9a0' : 'rgba(20,26,38,0.82)';
+      ctx.fillStyle = lit ? (rng() < 0.5 ? '#ffc978' : '#ffe3b0') : 'rgba(24,28,44,0.85)';
       ctx.fillRect(x, y, winW, winH);
+      if (deco) {
+        // A small sill under each window sells the painted depth.
+        ctx.fillStyle = shade(wall, 0.75);
+        ctx.fillRect(x - 2, y + winH, winW + 4, 2);
+      }
     }
   }
   const tex = new THREE.CanvasTexture(cv);
@@ -38,10 +70,22 @@ export function makeFacadeTexture(palette, floors, rng) {
   pctx.fillStyle = 'rgba(20,24,34,0.85)';
   pctx.fillRect(0, 0, w, h * 0.06);          // parapet
   pctx.fillRect(0, h * 0.86, w, h * 0.14);    // ground-floor plinth
+  if (deco) {
+    // Stepped crown motif in the parapet: three raised tabs, deco skyline.
+    pctx.fillStyle = shade(wall, 0.7);
+    pctx.fillRect(w * 0.18, 0, w * 0.12, h * 0.045);
+    pctx.fillRect(w * 0.44, 0, w * 0.12, h * 0.06);
+    pctx.fillRect(w * 0.70, 0, w * 0.12, h * 0.045);
+  }
   const doorW = w * 0.18;
   const doorX = (w - doorW) / 2;
   pctx.fillStyle = 'rgba(12,15,22,0.95)';
   pctx.fillRect(doorX, h * 0.78, doorW, h * 0.18);
+  if (deco) {
+    // Warm transom over the door: one lit entry, not a neon strip.
+    pctx.fillStyle = 'rgba(255,201,120,0.9)';
+    pctx.fillRect(doorX, h * 0.76, doorW, h * 0.02);
+  }
 
   return tex;
 }
@@ -57,7 +101,9 @@ export function createRenderer3D(canvas) {
   renderer.setClearColor(SUNSET.fog);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(SUNSET.fog, 120, 520);
+  // Moderate haze: depth cue between the camera and the far districts, but
+  // the island (578m) stays fully readable — no fog-out.
+  scene.fog = new THREE.Fog(SUNSET.fog, SUNSET.fogNear, SUNSET.fogFar);
 
   const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.5, 1600544);
   camera.position.set(0, 40, 90);
@@ -65,7 +111,9 @@ export function createRenderer3D(canvas) {
 
   // --- Sunset sky dome: big sphere with a vertex-colour gradient. ---
   // The single gradient sphere wraps the whole island, so the same dusk
-  // palette tints every district and no skybox texture ever loads.
+  // palette tints every district and no skybox texture ever loads. A cheap
+  // analytic glow + disc puts the low sun on the ocean horizon.
+  const sunDir = new THREE.Vector3(SUNSET.sunPos.x, SUNSET.sunPos.y, SUNSET.sunPos.z).normalize();
   const skyGeo = new THREE.SphereGeometry(1500, 32, 24);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -73,6 +121,9 @@ export function createRenderer3D(canvas) {
       topColor: { value: new THREE.Color(SUNSET.skyTop) },
       midColor: { value: new THREE.Color(SUNSET.skyMid) },
       lowColor: { value: new THREE.Color(SUNSET.skyLow) },
+      sunDir: { value: sunDir },
+      glowColor: { value: new THREE.Color(SUNSET.sunGlow) },
+      glowStrength: { value: 1.0 },
     },
     vertexShader: `
       varying vec3 vWorld;
@@ -84,12 +135,18 @@ export function createRenderer3D(canvas) {
     `,
     fragmentShader: `
       uniform vec3 topColor; uniform vec3 midColor; uniform vec3 lowColor;
+      uniform vec3 sunDir; uniform vec3 glowColor; uniform float glowStrength;
       varying vec3 vWorld;
       void main() {
         float h = clamp(vWorld.y, -0.2, 1.0);
         vec3 col = h < 0.15
           ? mix(lowColor, midColor, (h + 0.2) / 0.35)
           : mix(midColor, topColor, (h - 0.15) / 0.85);
+        // Warm halo around the sun: broad haze + tight core, then the disc.
+        float s = max(dot(normalize(vWorld), sunDir), 0.0);
+        col += glowColor * (pow(s, 24.0) * 0.5 + pow(s, 160.0) * 0.85) * glowStrength;
+        float disc = smoothstep(0.9993, 0.9997, s);
+        col = mix(col, vec3(1.0, 0.87, 0.62), disc * glowStrength);
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -97,9 +154,10 @@ export function createRenderer3D(canvas) {
   const sky = new THREE.Mesh(skyGeo, skyMat);
   scene.add(sky);
 
-  // --- Sunset lighting: warm low sun + soft hemisphere fill. ---
+  // --- Sunset lighting: warm low key over the ocean + cool violet fill. ---
+  // Sun sits ~7 deg above the horizon, ~6 deg off the ocean centre (config).
   const sun = new THREE.DirectionalLight(SUNSET.sun, SUNSET.sunIntensity);
-  sun.position.set(-80, 18, -60);
+  sun.position.set(SUNSET.sunPos.x, SUNSET.sunPos.y, SUNSET.sunPos.z);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -WORLD.total * 0.7;
@@ -109,12 +167,19 @@ export function createRenderer3D(canvas) {
   scene.add(sun);
   scene.add(sun.target);
 
-  const hemi = new THREE.HemisphereLight(SUNSET.hemiSky, SUNSET.hemiGround, 1.1);
+  const hemi = new THREE.HemisphereLight(SUNSET.hemiSky, SUNSET.hemiGround, 1.0);
   scene.add(hemi);
 
-  // --- Clouds: a few flat translucent billboards high up. ---
+  // Cool blue bounce from the opposite side so shadowed facades read violet,
+  // not black. No shadow map — it is fill only.
+  const fill = new THREE.DirectionalLight(SUNSET.fill, SUNSET.fillIntensity);
+  fill.position.set(120, 70, 90);
+  scene.add(fill);
+  scene.add(fill.target);
+
+  // --- Clouds: a few flat translucent billboards high up, dusk-tinted. ---
   const cloudGroup = new THREE.Group();
-  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffd9e0, transparent: true, opacity: 0.55 });
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffc9a8, transparent: true, opacity: 0.5 });
   for (let i = 0; i < 10; i += 1) {
     const cw = 60 + Math.random() * 120;
     const cd = 12 + Math.random() * 24;
@@ -145,9 +210,13 @@ export function createRenderer3D(canvas) {
     sunColor.set(SUNSET.sun).lerp(new THREE.Color(night), nightT);
     sun.intensity = nightIntensity;
     sun.color.copy(sunColor);
-    hemi.intensity = THREE.MathUtils.lerp(1.1, 0.5, nightT);
+    hemi.intensity = THREE.MathUtils.lerp(1.0, 0.5, nightT);
     hemiColor.set(SUNSET.hemiSky).lerp(new THREE.Color(night), nightT * 0.6);
     hemi.color.copy(hemiColor);
+    // The sun disc/halo and the cool bounce fade with the key light so the
+    // night creep stays one continuous identity, not a second palette.
+    skyMat.uniforms.glowStrength.value = THREE.MathUtils.lerp(1.0, 0.12, nightT);
+    fill.intensity = THREE.MathUtils.lerp(SUNSET.fillIntensity, 0.22, nightT);
 
     renderer.render(scene, camera);
   }
@@ -158,5 +227,5 @@ export function createRenderer3D(canvas) {
     renderer.setSize(canvas.clientWidth, canvas.clientHeight);
   }
 
-  return { scene, camera, update, resize, sun, hemi, skyMat };
+  return { scene, camera, update, resize, sun, hemi, fill, skyMat };
 }

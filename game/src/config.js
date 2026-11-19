@@ -31,11 +31,13 @@ export const SEA = {
  *  Each palette colours its buildings; the whole set is handed to the city so
  *  district identity reads clearly on the map screen and in the street. */
 export const DISTRICTS = [
-  { name: 'Coral Beach', centre: { x: -230, z: -230 }, palette: ['#ffd9e6', '#ffe3c4', '#ffc9a3', '#f7d7b5'], minH: 12, maxH: 26 },
+  // deco: true marks the showcase districts (boulevard + marina) whose
+  // facades get art-deco dressing in city.js; other districts stay plain.
+  { name: 'Coral Beach', centre: { x: -230, z: -230 }, palette: ['#ffd9e6', '#ffe3c4', '#ffc9a3', '#f7d7b5'], minH: 12, maxH: 26, deco: true },
   { name: 'Downtown',    centre: { x: 40,  z: 40  }, palette: ['#b8c6ff', '#c9b6ff', '#9fb8ff', '#b3a8ff'], minH: 30, maxH: 60 },
   { name: 'Old Quarter', centre: { x: -40, z: 210 }, palette: ['#f2d7a0', '#e8c488', '#f0c87f', '#e6b678'], minH: 9,  maxH: 16 },
   { name: 'Dockside',    centre: { x: 230, z: -40 }, palette: ['#9aa3ae', '#aeb3bb', '#88909a', '#b7bcc2'], minH: 10, maxH: 24 },
-  { name: 'Marina',      centre: { x: 210, z: 230 }, palette: ['#a8e6ff', '#9fd8f0', '#b5e9f7', '#a3e0ef'], minH: 10, maxH: 22 },
+  { name: 'Marina',      centre: { x: 210, z: 230 }, palette: ['#a8e6ff', '#9fd8f0', '#b5e9f7', '#a3e0ef'], minH: 10, maxH: 22, deco: true },
 ];
 
 /** Sunset palette and the day/time cycle. Day 1 clock starts at 17:40 (sunset). */
@@ -46,16 +48,31 @@ export const DAY = {
   clockSpeed: 1, // real seconds per game minute (slowed for pace; tune later)
 };
 
+/** One restrained golden-hour identity, shared by every scene (chase,
+ *  shootout, menu): warm low key over the ocean, cool violet fill, moderate
+ *  haze. Zenith #1a0b2e and sun glow #fc913a are the palette anchors.
+ *  sunPos is verified geometry: 6.9 deg elevation, 6.1 deg off the ocean
+ *  centre — the same bearing drives the sky-disc, the key light and the
+ *  sun-path on the water, so the three never disagree. */
 export const SUNSET = {
-  fog: 0xca8bb0,
-  skyTop: 0x2a1b55,
-  skyMid: 0xff7a6a,
-  skyLow: 0xffc27a,
-  sun: 0xffd19a,
-  sunIntensity: 1.6,
+  fog: 0xd68d76,
+  fogNear: 170,   // haze starts past the near streets...
+  fogFar: 920,    // ...and never swallows the island (578m across)
+  skyTop: 0x1a0b2e,   // zenith: deep violet
+  skyMid: 0xd96a72,   // coral band above the horizon
+  skyLow: 0xffa45e,   // warm horizon away from the sun
+  sunGlow: 0xfc913a,  // halo + sun-path colour around the low sun
+  sun: 0xffb168,      // warm key light
+  sunIntensity: 1.9,
+  // Low sun over the ocean (west): ~7 deg elevation, ~6 deg off the
+  // horizon centre. scene.js lights the city from here; city.js lays the
+  // sun-path on the water along the same bearing.
+  sunPos: { x: -140, y: 17, z: -15 },
   ambient: 0xffa76a,
-  hemiSky: 0xff9d8a,
-  hemiGround: 0x3a2a4a,
+  hemiSky: 0x8d7fd6,  // cool violet sky fill
+  hemiGround: 0x33244a,
+  fill: 0x5f6fd8,     // cool blue bounce on the shadowed facades
+  fillIntensity: 0.55,
   nightSky: 0x14143a,
   nightSunIntensity: 0.15,
 };
