@@ -8,6 +8,15 @@ import { STEP } from './config.js';
 
 export const SHOT_SCENES = ['1-chase', '2-shootout', '3-menu', '4-map'];
 
+/** ?stage= is a friendly alias onto the same ?shot= scenes — one staging
+ *  system, two spellings. ?shot= wins when both are present. */
+export const STAGE_ALIASES = {
+  chase: '1-chase',
+  shootout: '2-shootout',
+  menu: '3-menu',
+  map: '4-map',
+};
+
 /** Reset the shared state and set the missions list with `doneThrough` chapters
  *  DONE (0 = none) and the following chapter ACTIVE, so the menu CONTINUE and
  *  the map panel both read a believable, mid-story save. */
@@ -54,10 +63,14 @@ export function stageShot(name, ctx) {
 
 // --shots-chase-- marker: chase scene appends below
 
-/** Sunset police chase on the Coral Beach boulevard: Rook floors a Neon Comet
- *  with three wanted stars, four PD units in pursuit plus the GULLWATCH heli
- *  spotlight overhead, mission panel on The Getaway, HUD live, a drift popup
- *  queued. ~20s of real autopilot driving before the frame renders. */
+/** Sunset police chase on the Coral Beach coast — the cover frame.
+ *  Rook floors a Neon Comet west along the coastal cross-street toward the
+ *  boardwalk with three wanted stars: the low sun and the ocean sit dead
+ *  ahead at the end of the street, deco facades line both sides, two PD
+ *  cruisers come head-on out of the glow (one close, one far) and GULLWATCH
+ *  hangs overhead with its beam on the road. The hero camera (driving.js)
+ *  frames it low rear three-quarter; everything else is the live game —
+ *  traffic, rotor, lightbars and water keep running through the capture. */
 function stageChase(ctx) {
   const { state, driver, onFoot, wanted, scene, camera } = ctx;
 
@@ -68,15 +81,18 @@ function stageChase(ctx) {
   // Drop the parked starter mesh if it still exists, so it can't collide.
   if (ctx.parked) { scene.remove(ctx.parked.mesh); ctx.parked = null; }
 
-  // Enter a Neon Comet on a north-south boulevard along the Coral Beach coast.
+  // Enter a Neon Comet on the coastal cross-street that runs straight out
+  // to the boardwalk, facing west: the low sun and the ocean sit dead ahead
+  // at the end of the street, with the dressed boulevard crossing en route.
   const neon = (ctx.CARS || []).find((c) => c.name === 'Neon Comet') || ctx.CARS[2];
-  const x = -141;   // road centreline on the west (coast) side of the grid
-  const z = -70;
-  driver.enterCar(neon, { x, y: 0, z });
+  const x = -190;   // coastal E-W road, one block east of the boulevard
+  const z = -67;
+  driver.enterCar(neon, { x, y: 0, z }, -Math.PI / 2);
   onFoot.hide();   // Rook is behind the wheel now, not standing on the road
   state.inCar = true;
   state.currentCar = { name: neon.name, condition: 100, fuel: 100, nitro: 30 };
   state.speedKmh = 0;
+  state.clockMinutes = 17 * 60 + 44;   // golden hour, ahead of the night blend
 
   // Three-star manhunt: the wanted controller + police units do the rest.
   wanted.setStars(3);
@@ -90,13 +106,49 @@ function stageChase(ctx) {
   state.missionNext = 'STAGE 3/3: Lose the three-star chase and the heli';
   state.missionTimer = null;
 
-  // Chase camera follows the car.
-  driver.updateCamera(camera, 0.016);
-  camera.lookAt(x, 1.2, z);
+  // Cover framing for this staged drive only; normal play never sets it.
+  driver.setHeroCamera(true);
+  driver.updateCamera(camera, STEP);
 
-  // ~6s of real driving + police pursuit along the boulevard.
-  const snap = driveSnap();
-  for (let i = 0; i < 360; i += 1) {
+  // Scripted autopilot, all through the real driving model: a hard launch
+  // (wheelspin smoke), a throttle-duty cruise the pursuit can stay close to,
+  // then a handbrake blip so fresh tire smoke hangs in the captured frame.
+  const cruise = driveSnap();
+  const coast = { ...driveSnap(), up: false };
+  const blip = { ...driveSnap(), handbrake: true };
+
+  // One real step so the star roster spawns, then stage the pursuit's
+  // starting positions on the road grid via the live units accessor: a
+  // cruiser far ahead near the water's end (still head-on at capture), one
+  // mid-distance ahead, two on the tail. From here the real police AI drives
+  // them — nothing is frozen or faked.
+  ctx.stepWorld(STEP, cruise);
+  const spots = [
+    { x: x - 95, z: z - 3 },
+    { x: x - 60, z: z + 3 },
+    { x: x + 28, z: z + 3 },
+    { x: x + 52, z: z - 3 },
+  ];
+  ctx.police.units().forEach((u, i) => {
+    const s = spots[i % spots.length];
+    u.pos.set(s.x, 0, s.z);
+    u.heading = Math.atan2(x - s.x, z - s.z);
+  });
+
+  const plan = [];
+  // ~1.3s of autopilot: the launch smoke clears, fresh drift smoke hangs in
+  // the frame, and the hero still captures ON the asphalt (the painted road
+  // ends at the coast strip ahead) with both lead cruisers still head-on in
+  // frame — a longer run sweeps them past the camera and onto the sand.
+  for (let i = 0; i < 30; i += 1) plan.push(cruise);        // launch
+  for (let c = 0; c < 2; c += 1) {                          // duty cruise
+    for (let i = 0; i < 6; i += 1) plan.push(cruise);
+    for (let i = 0; i < 9; i += 1) plan.push(coast);
+  }
+  for (let i = 0; i < 8; i += 1) plan.push(blip);           // drift smoke
+  for (let i = 0; i < 6; i += 1) plan.push(cruise);
+  for (let i = 0; i < 6; i += 1) plan.push(coast);
+  for (const snap of plan) {
     ctx.stepWorld(STEP, snap);
   }
 

@@ -26,7 +26,7 @@ import { createRadio } from './audio/radio.js';
 import { createMenu, loadSettings, saveSettings } from './meta/menu.js';
 import { createMap } from './meta/map.js';
 import { createPause } from './meta/pause.js';
-import { stageShot, SHOT_SCENES } from './shots.js';
+import { stageShot, SHOT_SCENES, STAGE_ALIASES } from './shots.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -37,6 +37,27 @@ function boot() {
   const canvas = document.getElementById('world3d');
   const input = createInput();
   const state = createState();
+  // The wanted controller records the last-seen position as a plain {x,z}
+  // object, then updates it with .set() on the next sighting. Wrap the field
+  // so any assigned record carries a .set — no wanted-logic change, and the
+  // method is non-enumerable so saves still serialise as exactly {x,z}.
+  {
+    const wrap = (v) => {
+      if (v && typeof v.set !== 'function') {
+        Object.defineProperty(v, 'set', {
+          value(x, y, z) { this.x = x; this.z = z; return this; },
+          enumerable: false, writable: true, configurable: true,
+        });
+      }
+      return v;
+    };
+    let lsp = wrap(state.lastSeenPos);
+    Object.defineProperty(state, 'lastSeenPos', {
+      get() { return lsp; },
+      set(v) { lsp = wrap(v); },
+      enumerable: true, configurable: true,
+    });
+  }
   // Captured once when a ?shot= scene is staged, then replayed each frame so
   // the autopilot keeps driving/firing until the screenshot lands.
   let shotSnap = null;
@@ -653,9 +674,14 @@ function boot() {
 
   // --- ?shot= staging hook: stage a real, autopiloted scene (shots.js) into
   // the live world, then let the render loop paint it for a few frames before
-  // signalling the screenshot harness via window.__shotReady. ---
-  if (params.has('shot')) {
-    const shotName = params.get('shot');
+  // signalling the screenshot harness via window.__shotReady. ?stage=chase|
+  // shootout|menu|map aliases onto the same scenes (?shot= wins if both set);
+  // with neither parameter the game boots normally. ---
+  const stageParam = params.get('stage');
+  const stageName = stageParam && Object.prototype.hasOwnProperty.call(STAGE_ALIASES, stageParam)
+    ? STAGE_ALIASES[stageParam] : null;
+  if (params.has('shot') || stageName) {
+    const shotName = params.has('shot') ? params.get('shot') : stageName;
     const shotCtx = {
       state, city, driver, onFoot, arsenal, enemies, wanted, police, combat,
       mission, sideJobs, input, scene, camera, spawn, traffic, hud,

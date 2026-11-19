@@ -2,7 +2,7 @@
 // handbrake drift, nitro, fuel, condition, and a chase camera.
 import * as THREE from 'three';
 import { WORLD, CAR, CAMERA } from '../config.js';
-import { buildCarMesh } from './cars.js';
+import { buildCarMesh, makeGlowTexture } from './cars.js';
 
 /** Centerline x of road lane i (i in 0..WORLD.blocks). */
 function roadLine(i) {
@@ -56,28 +56,93 @@ export function createDriver(state, city, scene) {
   let drifting = false;
   let skid = 0;            // skid flag for the frame
   let driftScore = 0;      // accumulated drift score
+  let heroCam = false;     // staged cover framing (?stage=chase only)
+
+  // --- Tire smoke: a small capped pool of soft sprites at the rear wheels.
+  // Visual only — it never touches speed, steering or collision. A tiny LCG
+  // keeps the jitter deterministic so a staged frame reproduces from a seed.
+  const smoke = [];
+  const SMOKE_MAX = 36;
+  let smokeAcc = 0;
+  let smokeSeed = 987654321;
+  function smokeRand() {
+    smokeSeed = (smokeSeed * 16807) % 2147483647;
+    return smokeSeed / 2147483647;
+  }
+  function puffSmoke() {
+    if (smoke.length >= SMOKE_MAX) return;
+    const tex = makeGlowTexture();
+    const side = smokeRand() < 0.5 ? 1 : -1;
+    // Rear wheel in car-local space, rotated into the world by the heading.
+    const lx = side * 1.05;
+    const lz = -1.3;
+    const wx = pos.x + lx * Math.cos(heading) + lz * Math.sin(heading);
+    const wz = pos.z - lx * Math.sin(heading) + lz * Math.cos(heading);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, color: 0xd8c8b8, transparent: true, opacity: 0.38, depthWrite: false,
+    }));
+    sprite.position.set(wx, 0.18, wz);
+    sprite.scale.set(0.7, 0.7, 1);
+    scene.add(sprite);
+    smoke.push({
+      sprite, age: 0, life: 0.8 + smokeRand() * 0.5,
+      vx: (smokeRand() - 0.5) * 0.9 - Math.sin(heading) * 0.6,
+      vy: 0.9 + smokeRand() * 0.9,
+      vz: (smokeRand() - 0.5) * 0.9 - Math.cos(heading) * 0.6,
+    });
+  }
+  function updateSmoke(dt) {
+    for (let i = smoke.length - 1; i >= 0; i -= 1) {
+      const p = smoke[i];
+      p.age += dt;
+      if (p.age >= p.life) {
+        scene.remove(p.sprite);
+        p.sprite.material.dispose();
+        smoke.splice(i, 1);
+        continue;
+      }
+      const t = p.age / p.life;
+      p.sprite.position.x += p.vx * dt;
+      p.sprite.position.y += p.vy * dt;
+      p.sprite.position.z += p.vz * dt;
+      const s = 0.8 + t * 2.4;
+      p.sprite.scale.set(s, s, 1);
+      p.sprite.material.opacity = 0.38 * (1 - t);
+    }
+  }
+  function clearSmoke() {
+    for (const p of smoke) {
+      scene.remove(p.sprite);
+      p.sprite.material.dispose();
+    }
+    smoke.length = 0;
+  }
 
   function speedKmh() {
     return Math.abs(speed) * 3.6;
   }
 
-  function enterCar(carDef, position) {
+  function enterCar(carDef, position, startHeading = 0) {
     if (car) return;
     def = carDef;
     car = buildCarMesh(def);
     pos.copy(position);
     pos.y = 0;
-    heading = 0;
+    // Optional facing for live staging (?stage=chase); normal play always 0.
+    heading = startHeading;
     speed = 0;
     fuel = 100;
     nitro = CAR.nitroMax;
     car.position.copy(pos);
+    car.rotation.y = heading;
     scene.add(car);
   }
 
   function exitCar() {
     if (!car) return null;
     scene.remove(car);
+    clearSmoke();      // no frozen puffs left hanging over the road
+    heroCam = false;   // staged framing ends with the staged drive
     const drop = pos.clone();
     car = null;
     def = null;
@@ -85,6 +150,7 @@ export function createDriver(state, city, scene) {
   }
 
   function update(dt, input) {
+    updateSmoke(dt);
     if (!car) {
       speed = 0;
       return;
@@ -139,6 +205,20 @@ export function createDriver(state, city, scene) {
       skid = 0;
     }
 
+    // --- Tire smoke: hard launches (wheelspin off the line) and drifts.
+    // Capped at ~30 puffs/s and SMOKE_MAX sprites; purely visual. A totaled
+    // or fuel-stalled car can't spin its wheels, so it gets no launch smoke. ---
+    const hardAccel = condition > 0 && fuel > 0 && input.up && speed >= 0 && speed < 14;
+    if (drifting || hardAccel) {
+      smokeAcc += dt;
+      while (smokeAcc >= 1 / 30) {
+        smokeAcc -= 1 / 30;
+        puffSmoke();
+      }
+    } else {
+      smokeAcc = 0;
+    }
+
     // --- Integrate position along heading. ---
     pos.x += Math.sin(heading) * speed * dt;
     pos.z += Math.cos(heading) * speed * dt;
@@ -173,8 +253,39 @@ export function createDriver(state, city, scene) {
     }
   }
 
-  /** Chase camera: smooth follow behind the car; FOV widens with speed. */
+  /** Chase camera: smooth follow behind the car; FOV widens with speed.
+   *  In hero mode (set only by the ?stage=chase / ?shot=1-chase staging) it
+   *  swaps to the cover framing: low rear three-quarter, car large in the
+   *  lower frame, tilted up so GULLWATCH and its beam stay in shot. Normal
+   *  gameplay never sets hero mode, so the default camera is untouched. */
   function updateCamera(camera, dt) {
+    if (heroCam) {
+      const fx = Math.sin(heading);
+      const fz = Math.cos(heading);
+      const rx = -Math.cos(heading);   // screen-right of the travel direction
+      const rz = Math.sin(heading);
+      const back = 10.5;
+      const side = 4.0;
+      // Camera sits on the left kerb of the travel direction and looks
+      // across the car toward the sun side, so the ocean glow leads the
+      // frame and the car holds low in the frame, just off centre.
+      camera.position.set(
+        pos.x - fx * back - rx * side,
+        pos.y + 1.6,
+        pos.z - fz * back - rz * side
+      );
+      // Look ahead of the car, biased toward the sun and lifted so the
+      // frame spans the low car AND the heli hovering 40m above it, with
+      // margin under the top HUD strip.
+      camera.lookAt(
+        pos.x + fx * 10 + rx * 3,
+        pos.y + 15.5,
+        pos.z + fz * 10 + rz * 3
+      );
+      camera.fov += (94 - camera.fov) * Math.min(1, dt * 4);
+      camera.updateProjectionMatrix();
+      return;
+    }
     const back = 6.5 + speedKmh() * 0.05;
     const up = 2.6 + speedKmh() * 0.02;
     const bx = pos.x - Math.sin(heading) * back;
@@ -195,6 +306,7 @@ export function createDriver(state, city, scene) {
     exitCar,
     update,
     updateCamera,
+    setHeroCamera: (on) => { heroCam = !!on; },
     speedKmh,
     drifting: () => drifting,
     get driftScore() { return driftScore; },

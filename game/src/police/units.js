@@ -8,10 +8,13 @@
 import * as THREE from 'three';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';
+import { makeGlowTexture } from '../vehicles/cars.js';
 
 const WEST = -WORLD.total / 2;
 const STEP = WORLD.block + WORLD.road;
 const HALF = WORLD.road / 2;
+// GULLWATCH hover height; the spotlight beam spans exactly this far down.
+const HOVER_M = 40;
 
 // Light bar flash phase drives the red/blue emissive swap on cruisers.
 let lightPhase = 0;
@@ -56,6 +59,25 @@ function buildCruiser() {
   blueLamp.position.set(0.2, 1.72, -0.3);
   group.add(blueLamp);
 
+  // Lightbar glow: one additive sprite per lamp colour, pulsed in sync with
+  // the emissive swap below. Small lamp boxes alone vanish at chase distance
+  // in the dusk; the glow keeps the red/blue read without any real lights.
+  const glowTex = makeGlowTexture();
+  const redGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, color: 0xff3030, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  redGlow.position.set(-0.2, 1.78, -0.3);
+  redGlow.scale.set(2.4, 2.4, 1);
+  group.add(redGlow);
+  const blueGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, color: 0x3a7bff, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  blueGlow.position.set(0.2, 1.78, -0.3);
+  blueGlow.scale.set(2.4, 2.4, 1);
+  group.add(blueGlow);
+
   // Wheels: four dark cylinders on axle groups so the driving code can roll.
   const tyre = new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.9 });
   const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.16, 10);
@@ -84,7 +106,7 @@ function buildCruiser() {
   }
 
   group.userData.body = { r: 0.5, length: 4.3 };
-  group.userData.lights = { redMat, blueMat };
+  group.userData.lights = { redMat, blueMat, redGlow, blueGlow };
   return group;
 }
 
@@ -150,16 +172,32 @@ function buildHeli() {
   return group;
 }
 
-/** The GULLWATCH spotlight: a translucent cone that tilts down at Rook and
- *  reads as a beam of light without any real light or shadow cost. */
+/** The GULLWATCH spotlight: a translucent beam hanging from the heli down to
+ *  the road plus a soft pool where it lands. The group sits at HOVER_M; the
+ *  cone's apex is at the heli and its base on the street, so the beam reads
+ *  as light without any real light or shadow cost. */
 function buildSpotlight() {
+  const g = new THREE.Group();
   const cone = new THREE.Mesh(
-    new THREE.ConeGeometry(6, 46, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.18, depthWrite: false })
+    new THREE.ConeGeometry(4.5, HOVER_M, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2c0, transparent: true, opacity: 0.09,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    })
   );
-  cone.rotation.x = Math.PI;   // point down
-  cone.position.y = -23;
-  return cone;
+  cone.position.y = -HOVER_M / 2;   // apex at the heli, base at road level
+  g.add(cone);
+  const pool = new THREE.Mesh(
+    new THREE.PlaneGeometry(11, 11),
+    new THREE.MeshBasicMaterial({
+      map: makeGlowTexture(), color: 0xffe9b0, transparent: true, opacity: 0.14,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.y = -(HOVER_M - 0.1);   // just above the road, under the beam
+  g.add(pool);
+  return g;
 }
 
 /** Keep a car unit out of building blocks; slide it back to the nearer lane. */
@@ -279,15 +317,18 @@ export function createPolice(scene, city, rng, wanted) {
     return { dist, toward };
   }
 
-  /** Flash the light bar red/blue; ram flashes faster while in pursuit. */
+  /** Flash the light bar red/blue; ram flashes faster while in pursuit.
+   *  The glow sprites pulse with the same phase so the flash reads far off. */
   function flashLights(u, dt, hot) {
     if (!u.mesh.userData.lights) return;
-    const { redMat, blueMat } = u.mesh.userData.lights;
+    const { redMat, blueMat, redGlow, blueGlow } = u.mesh.userData.lights;
     const rate = hot ? 14 : 5;
     lightPhase += dt * rate;
     const on = (Math.sin(lightPhase) > 0) ^ (u.state === 'RAMMING');
     redMat.emissiveIntensity = on ? 2.2 : 0;
     blueMat.emissiveIntensity = on ? 0 : 2.2;
+    if (redGlow) redGlow.material.opacity = on ? 0.5 : 0.03;
+    if (blueGlow) blueGlow.material.opacity = on ? 0.03 : 0.5;
   }
 
   /** Feed the HUD a compact roster row (name, distanceM, state). */
@@ -368,11 +409,12 @@ export function createPolice(scene, city, rng, wanted) {
       const h = heli.mesh;
       h.position.x = target.x;
       h.position.z = target.z;
-      h.position.y = 40;
+      h.position.y = HOVER_M;
       if (heli.mesh.userData.rotor) {
         heli.mesh.userData.rotor.rotation.y += dt * 24;
       }
-      heli.spot.position.set(target.x, 0, target.z);
+      // Beam group hangs at the hover height so the cone spans heli->road.
+      heli.spot.position.set(target.x, HOVER_M, target.z);
     }
 
     writeFeed(target);

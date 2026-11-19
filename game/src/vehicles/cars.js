@@ -109,6 +109,31 @@ export function buildCarMesh(def) {
   return group;
 }
 
+// Shared soft radial glow texture (white core fading to transparent). Built
+// once on first use; the tire smoke (normal blending), police lightbar glow
+// and GULLWATCH spotlight pool (additive) all reuse it, so no effect pays for
+// its own canvas. The gradient is alpha-only, so it reads the same under any
+// blending mode or tint colour.
+let glowTex = null;
+export function makeGlowTexture() {
+  if (glowTex) return glowTex;
+  const cv = document.createElement('canvas');
+  cv.width = 64;
+  cv.height = 64;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(cv);
+  // White-core colour map: tag it sRGB like the other canvas textures so the
+  // tint colours (lamp red/blue, smoke, spotlight pool) decode consistently.
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  return glowTex;
+}
+
 /** Display name of a catalog entry or a built car mesh. */
 export function carName(def) {
   if (!def) return '??';
