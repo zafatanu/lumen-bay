@@ -49,7 +49,7 @@ export function createMissions(state, world, hooks = {}) {
    *  later ones stay LOCKED father.
    */
   function unlockThrough(id) {
-    if (!state.missions) state.missions = MISSIONS.map((x) => ({ id: x.id, status: 'LOCKED' }));
+    if (!state.missions || state.missions.length === 0) state.missions = MISSIONS.map((x) => ({ id: x.id, status: 'LOCKED' }));
     let unlocked = false;
     for (const mi of state.missions) {
       if (mi.id === id) { mi.status = 'ACTIVE'; unlocked = true; }

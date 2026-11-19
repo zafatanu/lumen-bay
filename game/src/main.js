@@ -93,7 +93,7 @@ function boot() {
   }
 
   // Player begins on foot, just beside the parked car.
-  onFoot.setPosition(new THREE.Vector3(spawn.x - 5, 0, spawn.z + 3), 0);
+  onFoot.setPosition(new THREE.Vector3(spawn.x - 2, 0, spawn.z + 3), 0);
 
   // Combat wires in the on-foot player, the arsenal and the enemies.
   let downTimer = 0; // seconds to linger on the WASTED screen before respawn
