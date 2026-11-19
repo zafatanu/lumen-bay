@@ -71,7 +71,7 @@ function getSparkTex() {
 
 /** Pooled muzzle and impact flashes: eight point lights and eight billboards
  *  live in the scene and are recycled, so a long session never accumulates
- *  lights (which is what would start costing frames). Each flash lasts 60 ms. */
+ *  lights (which is what would start costing frames). Each flash lasts 100 ms. */
 function makeFlashes(parent) {
   const lights = [];
   for (let i = 0; i < 8; i += 1) {
@@ -109,7 +109,7 @@ function makeFlashes(parent) {
     /** One gunshot's flash: a warm point light and a billboard at the muzzle. */
     muzzle(pos, scale) {
       const l = nextLight();
-      l.t = 0.06;
+      l.t = 0.10;
       l.light.position.copy(pos);
       l.light.intensity = 9;
       l.light.color.setHex(0xffc070);
@@ -120,7 +120,7 @@ function makeFlashes(parent) {
       sp.material.color.setHex(0xffe0a0);
       sp.material.opacity = 0.95;
       sp.visible = true;
-      sp.userData.t = 0.06;
+      sp.userData.t = 0.10;
     },
 
     /** Slightly cooler puff where a round lands on Rook or the street. */
@@ -149,7 +149,7 @@ function makeFlashes(parent) {
       for (const sp of sprites) {
         if (!sp.visible) continue;
         sp.userData.t -= dt;
-        const k = Math.max(0, sp.userData.t / 0.06);
+        const k = Math.max(0, sp.userData.t / 0.10);
         sp.material.opacity = 0.95 * k;
         if (sp.userData.t <= 0) sp.visible = false;
       }
@@ -414,6 +414,11 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     aimYaw = aimHeading(camera, snap.mouseX, snap.mouseY);
     if (crosshair) {
       crosshair.style.display = (onFootFire && cur && !cur.melee) ? 'block' : 'none';
+      // Track the pointer every frame: the 24px box is centred by its -12px
+      // CSS margin, so left/top are the raw mouse coords (it used to sit
+      // pinned at 0,0 because nothing ever positioned it).
+      crosshair.style.left = `${snap.mouseX}px`;
+      crosshair.style.top = `${snap.mouseY}px`;
     }
 
     if (onFootFire) {
@@ -442,6 +447,8 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
 
   return {
     update,
+    /** One forced muzzle flash at the current aim point (staged captures). */
+    flashMuzzle() { flashes.muzzle(muzzlePoint(), 1.2); },
     get aimYaw() { return aimYaw; },
     get hurt() { return hurtFlash; },
     get aiming() { return !!(arsenal.current && !arsenal.current.melee); },

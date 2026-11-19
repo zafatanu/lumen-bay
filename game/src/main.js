@@ -603,9 +603,18 @@ function boot() {
     // Only step the simulation while actually playing; the menu/map/pause
     // screens freeze the world (rendered statically each frame behind them).
     if (screen === 'play') {
-      while (accumulator >= STEP) {
-        step(STEP, shotSnap || undefined);
-        accumulator -= STEP;
+      if (shotSnap) {
+        // Staged capture (?shot=): hold the staged pose for the screenshot
+        // harness. The kit stages a scene and paints it without running the
+        // loop; stepping on would drift the camera (follow + FOV ease),
+        // fade the downed Gull, expire the muzzle flash and drift the stars
+        // before the screenshot lands.
+        accumulator = 0;
+      } else {
+        while (accumulator >= STEP) {
+          step(STEP, shotSnap || undefined);
+          accumulator -= STEP;
+        }
       }
     } else {
       accumulator = 0;
@@ -801,8 +810,9 @@ function boot() {
   resize();
 
   // --- ?shot= staging hook: stage a real, autopiloted scene (shots.js) into
-  // the live world, then let the render loop paint it for a few frames before
-  // signalling the screenshot harness via window.__shotReady. ?stage=chase|
+  // the live world, then hold it frozen (frame() skips stepping while shotSnap
+  // is set) and let the render loop paint it for a few frames before signalling
+  // the screenshot harness via window.__shotReady. ?stage=chase|
   // shootout|menu|map aliases onto the same scenes (?shot= wins if both set);
   // with neither parameter the game boots normally. ---
   const stageParam = params.get('stage');

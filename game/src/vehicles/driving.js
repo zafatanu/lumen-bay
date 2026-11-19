@@ -355,7 +355,7 @@ export function createDriver(state, city, scene) {
       const fz = Math.cos(heading);
       const rx = -Math.cos(heading);   // screen-right of the travel direction
       const rz = Math.sin(heading);
-      const back = 10.5;
+      const back = 8.0;
       const side = 4.0;
       // Camera sits on the left kerb of the travel direction and looks
       // across the car toward the sun side, so the ocean glow leads the
@@ -366,11 +366,12 @@ export function createDriver(state, city, scene) {
         pos.z - fz * back - rz * side
       );
       // Look ahead of the car, biased toward the sun and lifted so the
-      // frame spans the low car AND the heli hovering 40m above it, with
-      // margin under the top HUD strip.
+      // frame spans the low car AND the heli hovering 40m directly above
+      // it. 13m keeps the heli (and its rotor) inside the 94° frame at this
+      // 8m pull-back — 12m cuts it above the top edge.
       camera.lookAt(
         pos.x + fx * 10 + rx * 3,
-        pos.y + 15.5,
+        pos.y + 13,
         pos.z + fz * 10 + rz * 3
       );
       camera.fov += (94 - camera.fov) * Math.min(1, dt * 4);
