@@ -98,9 +98,6 @@ function stageChase(ctx) {
   const snap = driveSnap();
   for (let i = 0; i < 360; i += 1) {
     ctx.stepWorld(STEP, snap);
-    // A light weave keeps the shot from dead straight; straight reads cleaner.
-    if (i === 150) ctx.stepWorld(STEP, { ...snap, left: true });
-    if (i === 180) ctx.stepWorld(STEP, { ...snap, right: true });
   }
 
   // Re-assert the manhunt so the stars/heat survive the seconds until capture.
