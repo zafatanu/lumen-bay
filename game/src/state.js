@@ -179,5 +179,6 @@ export function createState() {
     return (done / ms.length) * 100;
   }
 
-  return { state, save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition, addRepXp, completionPct };
+  Object.assign(state, { save, load, reset, advanceClock, addXp, formatClock, summary, pushPopup, addStars, noteNearMiss, carCondition, addRepXp, completionPct });
+  return state;
 }
