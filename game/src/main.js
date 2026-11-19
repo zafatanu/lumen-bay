@@ -2,7 +2,7 @@
 // arcade driving, traffic + pedestrians, car stealing, clock advance, resize,
 // and the ?shot= staging hook.
 import * as THREE from 'three';
-import { STEP, SEED, PLAYER } from './config.js';
+import { STEP, SEED, PLAYER, SAVE_KEY } from './config.js';
 import { createRandom, seedFromString } from './random.js';
 import { createInput } from './input.js';
 import { createState } from './state.js';
@@ -23,6 +23,7 @@ import { districtPoint, MISSIONS as missionCatalog } from './missions/catalog.js
 import { drawPortrait } from './missions/characters.js';
 import { createHud } from './hud/hud.js';
 import { createRadio } from './audio/radio.js';
+import * as sfx from './audio/sfx.js';
 import { createMenu, loadSettings, saveSettings } from './meta/menu.js';
 import { createMap } from './meta/map.js';
 import { createPause } from './meta/pause.js';
@@ -100,6 +101,13 @@ function boot() {
     arsenal,
     radio,
     police,
+    // Live job-giver markers for the minimap blips (defined below; the
+    // getter is only called once the frame loop runs).
+    getMarkers: () => missionMarkers,
+    // Live conch-shell handles from placeShells() ({mesh,pos,taken}); the
+    // minimap/map plot the real catalog spots and drop the taken ones.
+    // Same late-binding pattern as getMarkers — shells is defined below.
+    getShells: () => shells,
   });
 
   // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
@@ -131,6 +139,7 @@ function boot() {
   function onWasted() {
     state.wastedCount += 1;
     downTimer = 1.8;
+    sfx.stopAll();   // the sim freezes while Rook is down: no engine/siren drone
     if (state.currentMission) mission.fail('WASTED');
     const wasted = document.getElementById('wasted-screen');
     if (wasted) wasted.style.display = 'grid';
@@ -140,6 +149,7 @@ function boot() {
   function onBusted() {
     state.bustedCount += 1;
     downTimer = 2.0;
+    sfx.stopAll();   // sim freezes while busted: no engine/siren drone
     const fine = Math.min(800, state.money);
     state.money = Math.max(0, state.money - fine);
     state.pushPopup(`BUSTED −$${fine}`);
@@ -186,15 +196,82 @@ function boot() {
   }
 
   // Mission-start markers in the world: Mama Luz in the Old Quarter plus the
-  // three side-job givers. Each is a small flat sign the player walks into
-  // and presses E to start the work.
+  // three side-job givers. Each one reads from the street as a pulsing ground
+  // ring, a tall pillar of light and a bobbing name label above the sign, so
+  // a fresh player can always see where to press E. Story = warm gold;
+  // side jobs keep the teal the old signs used. The minimap and full map
+  // draw matching blips (hud.js / meta/map.js) from this same list.
   const missionMarkers = [];
+  const MARKER_COLOURS = {
+    mission: { hex: 0xffc24a, css: '#ffc24a', emissive: 0x8a5a12, ringR: 2.0, pillarH: 26 },
+    sidejob: { hex: 0x2ae0c0, css: '#2ae0c0', emissive: 0x0f6a5e, ringR: 1.5, pillarH: 18 },
+  };
+  /** Canvas name-plate for a marker label, in the marker's own colour on a
+   *  dark backing so it stays legible against the sunset sky. */
+  function markerLabelTexture(text, css) {
+    const cv = document.createElement('canvas');
+    cv.width = 256;
+    cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = 'rgba(10,14,22,0.88)';
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.strokeStyle = css;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(4, 4, 248, 56);
+    ctx.fillStyle = css;
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 34);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
   function addMarker(pos, label, kind, jobId) {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x2ae0c0, emissive: 0x0f6a5e });
+    const c = MARKER_COLOURS[kind] || MARKER_COLOURS.sidejob;
+    const mat = new THREE.MeshStandardMaterial({ color: c.hex, emissive: c.emissive, emissiveIntensity: 0.6 });
     const sign = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.6, 0.2), mat);
     sign.position.set(pos.x, 1.1, pos.z);
     scene.add(sign);
-    missionMarkers.push({ pos, label, kind, jobId, mesh: sign, ring: null });
+    // Pulsing ground ring: flat additive torus the player can't miss.
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(c.ringR, 0.08, 8, 48),
+      new THREE.MeshBasicMaterial({ color: c.hex, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(pos.x, 0.06, pos.z);
+    scene.add(ring);
+    // Tall thin beacon pillar of light straight above the sign.
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.28, c.pillarH, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: c.hex, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+    );
+    pillar.position.set(pos.x, c.pillarH / 2, pos.z);
+    scene.add(pillar);
+    // Bobbing name label: a camera-facing sprite with the canvas name-plate.
+    const labelSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerLabelTexture(label, c.css), transparent: true, depthWrite: false }));
+    const labelY = 2.9;
+    labelSprite.scale.set(3.0, 0.75, 1);
+    labelSprite.position.set(pos.x, labelY, pos.z);
+    scene.add(labelSprite);
+    missionMarkers.push({
+      pos, label, kind, jobId, mesh: sign, ring, pillar, labelSprite, labelY,
+      phase: missionMarkers.length * 1.7,
+    });
+  }
+  /** Per-frame marker life: ring scale/opacity pulse, pillar shimmer and a
+   *  gentle label bob. Deterministic phases, no randomness. */
+  let markerTime = 0;
+  function updateMarkers(dt) {
+    markerTime += dt;
+    for (const mk of missionMarkers) {
+      const w = 0.5 + 0.5 * Math.sin(markerTime * 2.6 + mk.phase);
+      const s = 1 + 0.16 * Math.sin(markerTime * 2.6 + mk.phase);
+      mk.ring.scale.set(s, s, 1);
+      mk.ring.material.opacity = 0.5 + 0.35 * w;
+      mk.pillar.material.opacity = 0.24 + 0.12 * (0.5 + 0.5 * Math.sin(markerTime * 1.9 + mk.phase));
+      mk.labelSprite.position.y = mk.labelY + 0.16 * Math.sin(markerTime * 1.7 + mk.phase);
+    }
   }
   addMarker(districtPoint('Old Quarter'), 'MAMA LUZ', 'mission', null);
   addMarker(districtPoint('Downtown'), 'TAXI', 'sidejob', 'taxi');
@@ -211,6 +288,7 @@ function boot() {
       state.addRepXp(def.reward.repXp);
       if (!state.completedMissions.includes(def.id)) state.completedMissions.push(def.id);
       state.pushPopup(`MISSION CLEAR +$${def.reward.money} +${def.reward.repXp} XP`);
+      sfx.play('missionClear');
       state.save();
     },
     onFail: (reason) => {
@@ -264,7 +342,6 @@ function boot() {
   let radioStarted = false;
   let driftBank = 0;
   let menuAngle = 0.6;
-  const titleEl = document.getElementById('title-screen');
 
   /** Start the synth radio on the first real user gesture; browsers block the
    *  AudioContext until a key/mouse event, so this must sit in the input path. */
@@ -283,7 +360,9 @@ function boot() {
   function applySettings() {
     const s = state.settings || {};
     const volume = Number.isFinite(s.volume) ? Math.max(0, Math.min(1, s.volume)) : 1;
-    if (radio) radio.setMuted(!s.music || volume <= 0);
+    // Pass the 0..1 volume through (0 when music is off) so the slider
+    // scales the radio instead of hard-muting it.
+    if (radio) radio.setMuted(!s.music ? 0 : volume);
     const mm = document.querySelector('#hud [data-hud="minimap"]');
     if (mm) mm.style.display = s.minimap === false ? 'none' : '';
     state.shakeEnabled = s.shake !== false;
@@ -296,16 +375,61 @@ function boot() {
     return missionCatalog[i + 1].id;
   }
 
+  /** Snap the follow camera directly behind Rook (same back=3.4 / up=3.1 /
+   *  chest look as followCamera), so a new or continued run never lerps in
+   *  from wherever the menu orbit left the camera. */
+  function snapFollowCamera() {
+    const p = onFoot.getPosition();
+    const h = onFoot.heading;
+    camera.position.set(p.x - Math.sin(h) * 3.4, p.y + 3.1, p.z - Math.cos(h) * 3.4);
+    camera.userData.followLook = new THREE.Vector3(p.x, p.y + 1.0, p.z);
+    camera.lookAt(p.x, p.y + 1.0, p.z);
+    camera.fov = 55;
+    camera.updateProjectionMatrix();
+  }
+
+  /** True when a persisted save exists; gates the first-run onboarding so it
+   *  only ever plays on a genuinely fresh NEW GAME, never on CONTINUE or an
+   *  overwrite of an existing save. */
+  function hasSave() {
+    try { return !!window.localStorage.getItem(SAVE_KEY); } catch { return false; }
+  }
+
+  // First-run toasts reuse the existing popup system (3s lifetime each) and
+  // are staggered past that lifetime so they never stack on one frame. The
+  // token invalidates pending toasts if another new run starts mid-sequence.
+  let onboardingToken = 0;
+  function startOnboarding() {
+    const token = onboardingToken;
+    const say = (text, delayMs) => {
+      window.setTimeout(() => {
+        if (token === onboardingToken) state.pushPopup(text);
+      }, delayMs);
+    };
+    say('Follow the gold beacon \u2014 that\u2019s your first job.', 3200);
+    say('Press E at the beacon to start the job.', 6400);
+    say('WASD to move \u00b7 F to steal a car \u00b7 Space for nitro.', 9600);
+  }
+
   /** Start a brand-new run: reset state, unlock the first mission and open it. */
   function newGame() {
+    const fresh = !hasSave();
+    onboardingToken += 1;   // cancel any pending onboarding toast
     state.reset();
     // Keep the player's persisted settings across a fresh run.
     state.settings = Object.assign({ volume: 1, music: true, minimap: true, shake: true }, loadSettings());
     applySettings();
     mission.unlockThrough('m1');
-    state.pushPopup('Ch.1 \u00b7 First Light');
+    if (fresh) {
+      // Objective line now, then the staggered 3-step how-to sequence.
+      state.pushPopup('Ch.1 \u00b7 First Light \u2014 your first job waits at the gold beacon.');
+      startOnboarding();
+    } else {
+      state.pushPopup('Ch.1 \u00b7 First Light');
+    }
     onFoot.setPosition(new THREE.Vector3(spawn.x, 0, spawn.z + 6), 0);
     onFoot.show();
+    snapFollowCamera();
     state.inCar = false;
     if (state.currentCar) { state.currentCar = null; state.speedKmh = 0; }
   }
@@ -317,6 +441,7 @@ function boot() {
       applySettings();
       onFoot.setPosition(new THREE.Vector3(state.lastSeenPos && state.lastSeenPos.x != null ? state.lastSeenPos.x : spawn.x - 5, 0, state.lastSeenPos && state.lastSeenPos.z != null ? state.lastSeenPos.z : spawn.z + 3), 0);
       onFoot.show();
+      snapFollowCamera();
     } else {
       newGame();
     }
@@ -333,7 +458,7 @@ function boot() {
   const map = createMap(state, () => {
     const p = state.inCar && driver.car ? driver.car.position : onFoot.getPosition();
     return { x: p.x, z: p.z };
-  }, police);
+  }, police, () => missionMarkers, () => shells);
   const pause = createPause(state, {
     onResume: () => setScreen('play'),
     onRestart: () => { if (state.currentMission) mission.start(state.currentMission); setScreen('play'); },
@@ -380,35 +505,45 @@ function boot() {
 
   /** Controls reference text (same bindings as the HUD footer). */
   function controlsText() {
-    return `<div class="sub-body">WASD drive/walk \u00b7 SPACE handbrake \u00b7 F enter/steal car \u00b7 E interact
+    return `<div class="sub-body">WASD drive/walk \u00b7 E interact \u00b7 F enter/steal car \u00b7 SPACE nitro \u00b7 H handbrake \u00b7 Q horn
       <br>CLICK shoot \u00b7 1-4 weapons \u00b7 R reload \u00b7 N radio \u00b7 M map \u00b7 ESC pause</div>`;
   }
 
-  /** How-to-play panel: goal, controls, wanted, tips. */
+  /** How-to-play panel: goal, first job, controls, wanted, tips. */
   function howToText() {
     return `<div class="sub-body">
       <b>Goal</b> \u2014 play 8 story missions across Lumen Bay, build REP, and own the island.
-      <br><b>Driving</b> \u2014 steal a car with F, drive with WASD, handbrake with SPACE.
+      <br><b>First job</b> \u2014 follow the gold beacon to Mama Luz and press E at the marker to start.
+      <br><b>Driving</b> \u2014 steal a car with F, drive with WASD, SPACE for nitro, H for handbrake.
       <br><b>Wanted</b> \u2014 cops chase at 1-5 stars; lose them to clear your heat.
       <br><b>Tips</b> \u2014 drift for cash, grab conch shells (+$100), and finish missions to autosave.
     </div>`;
   }
 
-  /** Apply the boot settings before the first frame, and hide the title. */
+  /** Apply the boot settings before the first frame. */
   // Persisted settings (lumen-bay-settings) win over the state defaults so a
   // fresh boot keeps the player's last choices until a save overrides them.
   state.settings = Object.assign(state.settings, loadSettings());
   applySettings();
-  titleEl.style.display = 'none';
   setScreen('menu');
 
   /** Central screen switch: updates `screen` and shows/hides overlays. */
   function setScreen(next) {
     screen = next;
     hideSub();
+    // Ghosting fix: the menu/map/pause overlays are semi-transparent, so the
+    // live HUD underneath bleeds through them. Hide every HUD panel (plus the
+    // crosshair and popups) via one class whenever we are not in play; the
+    // overlays themselves are .fullscreen siblings, so they stay visible.
+    // hud.update() keeps running untouched — removing the class on return to
+    // play brings the whole HUD back on the very next frame.
+    hudEl.classList.toggle('hud-hidden', next !== 'play');
+    // Leaving play freezes the sim: silence the continuous audio layers so
+    // the engine/siren never drone under the menu, map or pause overlay.
+    if (next !== 'play') sfx.stopAll();
     if (next !== 'menu') { menuClose && menuClose(); menuClose = null; }
-    if (next === 'menu') { menuClose && menuClose(); titleEl.style.display = 'none'; menuRefresh(); }
-    else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); titleEl.style.display = 'none'; }
+    if (next === 'menu') { menuClose && menuClose(); menuRefresh(); }
+    else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); }
     else if (next === 'paused') { pause.open(); map.close(); }
     else if (next === 'map') { map.open(); pause.close(); }
   }
@@ -439,8 +574,7 @@ function boot() {
     if (screen === 'menu') { consumeNav(); return; }
     if (input.pressed('Enter') || input.pressed('Space')) {
       ensureRadio();
-      if (screen === 'title') setScreen('menu');
-      else if (screen === 'paused') setScreen('play');
+      if (screen === 'paused') setScreen('play');
     }
     if (input.pressed('Escape')) {
       ensureRadio();
@@ -480,9 +614,18 @@ function boot() {
     // Only step the simulation while actually playing; the menu/map/pause
     // screens freeze the world (rendered statically each frame behind them).
     if (screen === 'play') {
-      while (accumulator >= STEP) {
-        step(STEP, shotSnap || undefined);
-        accumulator -= STEP;
+      if (shotSnap) {
+        // Staged capture (?shot=): hold the staged pose for the screenshot
+        // harness. The kit stages a scene and paints it without running the
+        // loop; stepping on would drift the camera (follow + FOV ease),
+        // fade the downed Gull, expire the muzzle flash and drift the stars
+        // before the screenshot lands.
+        accumulator = 0;
+      } else {
+        while (accumulator >= STEP) {
+          step(STEP, shotSnap || undefined);
+          accumulator -= STEP;
+        }
       }
     } else {
       accumulator = 0;
@@ -492,8 +635,10 @@ function boot() {
     if (screen === 'menu') menuCamera(frameTime);
     update(STEP, state.clockMinutes);
     hud.update(STEP);
-    // Drain popups so they disappear after their lifetime.
-    if (state.popups.length) {
+    // Drain popups so they disappear after their lifetime. A staged capture
+    // (?shot=) holds them like it holds the sim: stepping the drain would
+    // expire the cover's DRIFT payout before the screenshot lands.
+    if (!shotSnap && state.popups.length) {
       state.popups = state.popups.filter((p) => { p.t -= STEP; return p.t > 0; });
     }
   }
@@ -596,7 +741,7 @@ function boot() {
       }
       if (input.consumeAny(['KeyF'])) exitCar();
     } else {
-      followCamera(camera, dt, onFoot.getPosition(), onFoot.heading);
+      followCamera(camera, dt, onFoot.getPosition(), onFoot.heading, city.colliders);
       onFoot.update(dt, snap, camera, combat.aimYaw, combat.aiming);
       traffic.update(dt, onFoot.getPosition(), 0);
       if (input.consumeAny(['KeyF'])) trySteal();
@@ -626,6 +771,7 @@ function boot() {
       mission.update(dt, ppos);
       sideJobs.update(dt, ppos, shells, scene);
       updateBeacon();
+      updateMarkers(dt);
       if (input.consumeAny(['KeyE'])) tryStartMission();
     }
   }
@@ -646,7 +792,10 @@ function boot() {
 
   // Pressing E beside a mission/side-job marker starts that job, if its
   // story mission is unlocked (story) or its district is ready (side job).
+  // Every path that can't start a job says why via a popup — no silent
+  // no-ops. Mission state logic itself is unchanged.
   function tryStartMission() {
+    if (state.inCar) { state.pushPopup('Get out to start the job (F).'); return; }
     const pp = onFoot.getPosition();
     const reach = PLAYER.reach + 2.5;
     let nearest = null;
@@ -654,17 +803,18 @@ function boot() {
       const d = Math.hypot(mk.pos.x - pp.x, mk.pos.z - pp.z);
       if (d <= reach && (!nearest || d < nearest.d)) nearest = { mk, d };
     }
-    if (!nearest) return;
+    if (!nearest) { state.pushPopup('No job available here yet \u2014 find a glowing marker.'); return; }
     const mk = nearest.mk;
     if (mk.kind === 'mission') {
-      if (state.currentMission) { state.pushPopup('Already on a job.'); return; }
+      if (state.currentMission) { state.pushPopup('Finish the current job first.'); return; }
       // Only the currently-unlocked story mission is startable at the marker.
       const active = (state.missions || []).find((mi) => mi.status === 'ACTIVE');
-      if (active) mission.start(active.id);
+      if (!active) { state.pushPopup('No story job unlocked yet.'); return; }
+      if (!mission.start(active.id)) state.pushPopup('That job is not ready yet.');
     } else if (mk.kind === 'sidejob') {
       if (state.currentMission) { state.pushPopup('Finish the story mission first.'); return; }
       if (state.sideJob) { state.pushPopup('Already running a side job.'); return; }
-      sideJobs.start(mk.jobId);
+      if (!sideJobs.start(mk.jobId)) state.pushPopup('That job is not ready yet.');
     }
   }
 
@@ -673,8 +823,9 @@ function boot() {
   resize();
 
   // --- ?shot= staging hook: stage a real, autopiloted scene (shots.js) into
-  // the live world, then let the render loop paint it for a few frames before
-  // signalling the screenshot harness via window.__shotReady. ?stage=chase|
+  // the live world, then hold it frozen (frame() skips stepping while shotSnap
+  // is set) and let the render loop paint it for a few frames before signalling
+  // the screenshot harness via window.__shotReady. ?stage=chase|
   // shootout|menu|map aliases onto the same scenes (?shot= wins if both set);
   // with neither parameter the game boots normally. ---
   const stageParam = params.get('stage');
@@ -686,6 +837,8 @@ function boot() {
       state, city, driver, onFoot, arsenal, enemies, wanted, police, combat,
       mission, sideJobs, input, scene, camera, spawn, traffic, hud,
       crosshair: crosshairEl, parked, CARS, MISSIONS: missionCatalog,
+      // Live conch handles for staging-only consistency tweaks (stageMap).
+      shells,
       setScreen, ensureRadio, applySettings,
       stepWorld: step, update,
     };

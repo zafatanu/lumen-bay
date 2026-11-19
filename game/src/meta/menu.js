@@ -4,6 +4,7 @@
 import { CHARACTERS } from '../missions/catalog.js';
 import { drawPortrait } from '../missions/characters.js';
 import { SAVE_KEY } from '../config.js';
+import * as sfx from '../audio/sfx.js';
 
 const SETTINGS_KEY = 'lumen-bay-settings';
 
@@ -106,6 +107,7 @@ export function createMenu(state, callbacks = {}) {
       <div class="menu-logo">LUMEN <span>BAY</span></div>
       <div class="menu-tag">A sun-soaked island crime story</div>
       <div class="menu-judge">8 story missions \u00b7 traffic \u00b7 police chases \u00b7 radio \u00b7 saves</div>
+      <div class="menu-judge">WASD moves Rook once in game \u2014 here use arrows + Enter, choose NEW GAME</div>
       <div class="menu-buttons">
         <button data-mb="continue"${hasSave ? '' : ' disabled'}>CONTINUE${hasSave ? `<span class="mb-sub">${saveSummary}</span>` : ''}</button>
         <button data-mb="newgame">NEW GAME</button>
@@ -142,6 +144,7 @@ export function createMenu(state, callbacks = {}) {
   dom.addEventListener('keydown', onKey);
 
   const fire = (name) => {
+    sfx.play('click');   // UI tick on every menu activation
     if (name === 'continue' && callbacks.onContinue) callbacks.onContinue();
     else if (name === 'newgame') callbacks.onNewGame();
     else if (name === 'controls') callbacks.onControls();
@@ -155,6 +158,7 @@ export function createMenu(state, callbacks = {}) {
 
   // NEW GAME must confirm if a save already exists.
   dom.querySelector('[data-mb="newgame"]').addEventListener('click', () => {
+    sfx.play('click');   // NEW GAME bypasses fire() for its confirm dialog
     if (hasSave) {
       const ok = window.confirm('This overwrites your current save. Start fresh?');
       if (!ok) return;

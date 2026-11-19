@@ -1,11 +1,12 @@
 // LUMEN BAY police units: navy-white cruisers, a lone interceptor, roadblock
-// teams and a spotter helicopter ("HELI 1 'GULLWATCH'"). They drive the road
+// teams and a spotter helicopter ("AIR ONE 'GULLWATCH'"). They drive the road
 // grid toward the player, ram his car, box him in when he stalls and — at high
 // stars — light him up from the sky. Units drive the same road grid as traffic,
 // so a chase keeps to the boulevards. Names are original to Lumen Bay; none are
 // copied from any other game. Audio lives in the radio session; here it's
 // purely visual (flashing light bars, a spotlight cone) plus the AI that chases.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';
 import { makeGlowTexture } from '../vehicles/cars.js';
@@ -121,15 +122,31 @@ function nearestLine(v) {
   return roadLine(Math.max(0, Math.min(WORLD.blocks, i)));
 }
 
-/** The original Lumen Bay PD roster. Each unit keeps a stable name. */
+// Original Lumen Bay PD callsigns: coastal bay names with unit numbers, one
+// per spawn slot so the feed never repeats a name. The role rides with the
+// callsign (PATROL / INTERCEPT / ROADBLOCK); the live AI state column in the
+// feed says what each unit is doing right now (PURSUIT, RAMMING, EN ROUTE...).
+const CALLSIGNS = [
+  'TIDE 37 · PATROL',
+  'PIER 5 · PATROL',
+  'GULL 12 · INTERCEPT',
+  'SURF 9 · PATROL',
+  'CORAL 23 · ROADBLOCK',
+  'HARBOR 8 · PATROL',
+];
+// The spotter helicopter's callsign; GULLWATCH is its original Lumen Bay name.
+const AIR_NAME = "AIR ONE 'GULLWATCH'";
+
+/** The original Lumen Bay PD roster. Each unit keeps a stable callsign. */
 function roster(stars) {
   // Scale up with stars: 1->1-2 patrols, 2->3, 3->4 + heli, 4->5+heli+block,
   // 5->6+heli+block. The interceptor appears from 3 stars on.
   const names = [];
   const patrols = stars <= 1 ? (Math.random() < 0.5 ? 1 : 2) : stars;
-  for (let i = 0; i < patrols && i < 6; i += 1) names.push(`PATROL ${i + 1}`);
-  if (stars >= 3) names.push('INTERCEPTOR 1');
-  if (stars >= 4) names.push('ROADBLOCK UNIT');
+  const patrolSlots = [0, 1, 3, 5];
+  for (let i = 0; i < patrols && i < patrolSlots.length; i += 1) names.push(CALLSIGNS[patrolSlots[i]]);
+  if (stars >= 3) names.push(CALLSIGNS[2]);   // GULL 12 · INTERCEPT
+  if (stars >= 4) names.push(CALLSIGNS[4]);   // CORAL 23 · ROADBLOCK
   return names;
 }
 
@@ -329,6 +346,9 @@ export function createPolice(scene, city, rng, wanted) {
     blueMat.emissiveIntensity = on ? 0 : 2.2;
     if (redGlow) redGlow.material.opacity = on ? 0.5 : 0.03;
     if (blueGlow) blueGlow.material.opacity = on ? 0.03 : 0.5;
+    // The two-tone siren rides the lead unit's flash phase (units[0]); it
+    // only ever sounds here, inside the wanted-active update path.
+    if (units.length && u === units[0]) sfx.setSiren(on);
   }
 
   /** Feed the HUD a compact roster row (name, distanceM, state). */
@@ -343,7 +363,7 @@ export function createPolice(scene, city, rng, wanted) {
     }
     if (heli) {
       const d = Math.round(Math.hypot(playerPos.x - heli.mesh.position.x, playerPos.z - heli.mesh.position.z));
-      wanted.policeFeed.push({ name: "HELI 1 'GULLWATCH'", distanceM: d, state: 'SPOTLIGHT' });
+      wanted.policeFeed.push({ name: AIR_NAME, distanceM: d, state: 'SPOTLIGHT' });
     }
   }
 
@@ -361,10 +381,11 @@ export function createPolice(scene, city, rng, wanted) {
       return { ram: null, bust: false };
     }
 
-    // Keep the roster at the star-appropriate strength.
+    // Keep the roster at the star-appropriate strength. Each spawn slot gets
+    // its own callsign — the feed lists distinct units, never a repeated name.
     const need = wantedCount();
     while (units.length < need) {
-      makeUnit(units.length ? units[0].name : `PATROL ${units.length + 1}`, target);
+      makeUnit(CALLSIGNS[units.length % CALLSIGNS.length], target);
     }
     if (stars >= 3) spawnHeli();
 
@@ -428,6 +449,7 @@ export function createPolice(scene, city, rng, wanted) {
 
   /** Tear down every unit and the heli. */
   function clear() {
+    sfx.setSiren(false);   // heat gone (or teardown): the two-tone stands down
     for (const u of units) scene.remove(u.mesh);
     units.length = 0;
     if (heli) {

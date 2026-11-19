@@ -4,6 +4,7 @@
 // enemies.js. This module resolves hits, renders muzzle flashes and tracers,
 // and applies hurt to both sides.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 
 /** Muzzle height above Rook's feet ("gun at the chest"). */
 const MUZZLE_Y = 1.22;
@@ -70,7 +71,7 @@ function getSparkTex() {
 
 /** Pooled muzzle and impact flashes: eight point lights and eight billboards
  *  live in the scene and are recycled, so a long session never accumulates
- *  lights (which is what would start costing frames). Each flash lasts 60 ms. */
+ *  lights (which is what would start costing frames). Each flash lasts 100 ms. */
 function makeFlashes(parent) {
   const lights = [];
   for (let i = 0; i < 8; i += 1) {
@@ -108,7 +109,7 @@ function makeFlashes(parent) {
     /** One gunshot's flash: a warm point light and a billboard at the muzzle. */
     muzzle(pos, scale) {
       const l = nextLight();
-      l.t = 0.06;
+      l.t = 0.10;
       l.light.position.copy(pos);
       l.light.intensity = 9;
       l.light.color.setHex(0xffc070);
@@ -119,7 +120,7 @@ function makeFlashes(parent) {
       sp.material.color.setHex(0xffe0a0);
       sp.material.opacity = 0.95;
       sp.visible = true;
-      sp.userData.t = 0.06;
+      sp.userData.t = 0.10;
     },
 
     /** Slightly cooler puff where a round lands on Rook or the street. */
@@ -148,7 +149,7 @@ function makeFlashes(parent) {
       for (const sp of sprites) {
         if (!sp.visible) continue;
         sp.userData.t -= dt;
-        const k = Math.max(0, sp.userData.t / 0.06);
+        const k = Math.max(0, sp.userData.t / 0.10);
         sp.material.opacity = 0.95 * k;
         if (sp.userData.t <= 0) sp.visible = false;
       }
@@ -238,6 +239,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     }
     state.health = Math.max(0, state.health - rest);
     hurtFlash = 1;
+    sfx.play('impact');   // dull thud for rounds landing on Rook
     if (onHurt) onHurt(rounds);
     if (state.health <= 0 && !state.down) {
       state.down = true;
@@ -334,6 +336,8 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     dir.z += (Math.random() - 0.5) * sp * 2;
     dir.normalize();
     if (shot.muzzle) flashes.muzzle(muzzle, 1.2 + shot.knock * 2);
+    // Per-weapon report: shotgun thumps lower, SMG stays light (sfx.js).
+    sfx.play('gunshot', { weapon: shot.weapon.id });
     aimPitch += (Math.random() - 0.5) * 0.006;
     // Firing a weapon is itself a crime the wanted meter tracks.
     if (wanted) wanted.addHeat(2, 'shoot');
@@ -410,6 +414,11 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     aimYaw = aimHeading(camera, snap.mouseX, snap.mouseY);
     if (crosshair) {
       crosshair.style.display = (onFootFire && cur && !cur.melee) ? 'block' : 'none';
+      // Track the pointer every frame: the 24px box is centred by its -12px
+      // CSS margin, so left/top are the raw mouse coords (it used to sit
+      // pinned at 0,0 because nothing ever positioned it).
+      crosshair.style.left = `${snap.mouseX}px`;
+      crosshair.style.top = `${snap.mouseY}px`;
     }
 
     if (onFootFire) {
@@ -438,6 +447,8 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
 
   return {
     update,
+    /** One forced muzzle flash at the current aim point (staged captures). */
+    flashMuzzle() { flashes.muzzle(muzzlePoint(), 1.2); },
     get aimYaw() { return aimYaw; },
     get hurt() { return hurtFlash; },
     get aiming() { return !!(arsenal.current && !arsenal.current.melee); },

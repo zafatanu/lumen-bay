@@ -46,12 +46,20 @@
 #hud .mp-next {
   font-size: 11px; color: #ffd9a0; opacity: 0.85; margin-top: 4px;
   border-top: 1px dashed rgba(255,217,160,0.3); padding-top: 4px;
+  /* One-line read: the NEXT row shows the following stage's objective and
+     must never wrap into a second copy of the mission text. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* --hud-css-mission-- marker: mission panel */
-/* Mid-left: police roster — named units with distance and AI state. */
+/* Mid-left: police roster — named units with distance and AI state. Sits
+   below the mission panel and is capped so its bottom edge always stays
+   above the minimap panel (whose top is ~100vh - 266px with bottom:10px):
+   150px + (100vh - 424px) = 100vh - 274px, an 8px+ clearance at any height.
+   At 600px+ viewports the full 7-unit roster fits without clipping. */
 #hud .hud-ml {
-  top: 190px; left: 12px; width: 250px; border-left: 3px solid #4a7aff;
+  top: 150px; left: 12px; width: 250px; border-left: 3px solid #4a7aff;
+  max-height: calc(100vh - 424px); overflow: hidden;
 }
 #hud .pl-title {
   font-size: 11px; letter-spacing: 0.14em; color: #4a7aff; margin-bottom: 4px;
@@ -61,7 +69,7 @@
 }
 #hud .pl-row {
   display: flex; align-items: center; gap: 8px; font-size: 11px;
-  padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 #hud .pl-name { flex: 1; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #hud .pl-dist { color: #ffd9a0; font-variant-numeric: tabular-nums; }
@@ -74,8 +82,43 @@
 #hud .pl-state.en-route { color: #8fe0ff; }
 
 /* --hud-css-police-- marker: police list */
-/* Bottom-left: circular minimap canvas + health/armour/REP bars. */
-#hud .hud-bl { bottom: 42px; left: 12px; width: 196px; text-align: center; }
+/* Top-centre-left: crew chip row (P10) — three active crew portraits + roles
+   plus the car's live condition. Display-only: the catalog cast (catalog.js
+   CHARACTERS) has no ability/cooldown mechanics, so the chips show identity,
+   not invented keybinds. Placement from the chase-cover layout math at
+   1280x800: left 292px clears the mission panel (right edge ~290px); top
+   44px sits under GULLWATCH's body (top ~30px, x ~620-680) so the heli stays
+   readable; the row ends ~x735, well left of the WANTED banner (left edge
+   ~810px) and above the score popups (top 96px, right side). The hero car,
+   dialogue, minimap and weapon slots all live in the bottom half. */
+#hud .hud-crew {
+  top: 44px; left: 292px; display: flex; gap: 6px; align-items: center;
+  padding: 5px 8px; border-left: 3px solid #2ae0c0;
+}
+#hud .crew-chip { display: flex; align-items: center; gap: 5px; }
+#hud .crew-img {
+  width: 28px; height: 28px; border-radius: 6px; flex: 0 0 auto;
+  border: 1px solid rgba(255,217,160,0.45); background: #1a2230;
+  object-fit: cover;
+}
+#hud .crew-txt { display: flex; flex-direction: column; text-align: left; }
+#hud .crew-name {
+  font-size: 10px; color: #fff; letter-spacing: 0.04em; white-space: nowrap;
+}
+#hud .crew-role {
+  font-size: 8px; color: #ffd9a0; letter-spacing: 0.03em; white-space: nowrap;
+  opacity: 0.9;
+}
+#hud .crew-cond .crew-bar { width: 64px; height: 5px; margin: 2px 0 0; }
+#hud .crew-cond .crew-bar .fill {
+  background: linear-gradient(90deg, #ff5a5a, #ffd94a);
+}
+
+/* --hud-css-crew-- marker: crew chip row */
+/* Bottom-left: circular minimap canvas + health/armour/REP bars. Bottom edge
+   dropped 42->10px so the police feed above gains clearance (see .hud-ml);
+   the centred footer never reaches this far left at the 1280 layout. */
+#hud .hud-bl { bottom: 10px; left: 12px; width: 196px; text-align: center; }
 #hud .hud-bl canvas {
   width: 192px; height: 192px; border-radius: 50%;
   border: 2px solid rgba(42,224,192,0.6); box-shadow: 0 0 18px rgba(42,224,192,0.25);
@@ -108,9 +151,10 @@
 }
 
 /* --hud-css-tr-- marker: wanted / money / clock */
-/* Bottom-right: speedometer — big km/h, car name, condition/nitro/fuel bars. */
+/* Bottom-right: speedometer — big km/h, car name, condition/nitro/fuel bars.
+   Bottom edge matches the minimap panel (10px) so the bottom row stays level. */
 #hud .hud-br {
-  bottom: 42px; right: 12px; width: 210px; text-align: right;
+  bottom: 10px; right: 12px; width: 210px; text-align: right;
   border-right: 3px solid #2ae0c0;
 }
 #hud .sp-num { font-size: 44px; line-height: 1; color: #fff; font-variant-numeric: tabular-nums;
@@ -128,10 +172,14 @@
 }
 
 /* --hud-css-speedo-- marker: speedometer + car */
-/* Bottom-centre: dialogue portrait + speaker + line. */
+/* Bottom-centre-left: dialogue portrait + speaker + line. Shifted off the
+   centre line so it never covers the hero car (which frames low-centre in
+   the chase cover, left edge ~x600 at 1280): left 236px clears the minimap
+   panel (right edge ~230px) and the 340px width ends at x576, well left of
+   both the car and the weapon slots (left edge ~844px). */
 #hud .hud-bc {
-  bottom: 118px; left: 50%; transform: translateX(-50%);
-  width: 430px; display: none; align-items: center; gap: 10px;
+  bottom: 118px; left: 236px;
+  width: 340px; display: none; align-items: center; gap: 10px;
   background: linear-gradient(180deg, rgba(10,16,28,0.72), rgba(10,16,28,0.5));
   border-left: 3px solid #ffd9a0;
 }
@@ -184,11 +232,14 @@
   animation: poprise 2.5s ease forwards;
 }
 #hud .popup.pop-fade { opacity: 0.25; }
+/* The rise settles at full opacity and HOLDS: the popup's lifetime is owned
+   by the state drain (removed at t=0, dimmed by .pop-fade in the last 0.8s),
+   not by the animation. Ending transparent here made staged capture popups
+   vanish 2.5s in even while the staged frame held everything else. */
 @keyframes poprise {
   0% { opacity: 0; transform: translateY(10px); }
   12% { opacity: 1; transform: translateY(0); }
-  80% { opacity: 1; }
-  100% { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 /* --hud-css-popups-- marker: score popups */
@@ -203,6 +254,20 @@
 #hud .hud-footer b { color: #ffd9a0; font-weight: 700; }
 
 /* --hud-css-footer-- marker: controls footer */
+
+/* Ghosting fix (P9): main.js setScreen() toggles .hud-hidden on #hud whenever
+   the screen is not 'play'. The menu/map/pause overlays are semi-transparent,
+   so every HUD panel — plus the crosshair and score popups — is hidden under
+   them instead of bleeding through. The overlays themselves are .fullscreen
+   siblings (not .panel), so they stay fully visible; returning to play removes
+   the class and the HUD is live again on the next frame. hud.update() itself
+   is untouched. */
+#hud.hud-hidden .panel,
+#hud.hud-hidden .hud-footer,
+#hud.hud-hidden #crosshair,
+#hud.hud-hidden #popups {
+  visibility: hidden;
+}
 
 /* ===== S7: title menu / full map / pause overlays =====
    These full-screen shells live as siblings of the HUD panels inside #hud.

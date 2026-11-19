@@ -5,8 +5,10 @@
 // Movement and fire are pure data: combat.js and main.js decide the hits.
 // Every enemy walks the same road grid as Rook, so cover reads as fair.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';
+import { limb, swingWalk, STRIDE } from '../figure.js';
 
 const WEST = -WORLD.total / 2;
 const STEP = WORLD.block + WORLD.road;
@@ -108,7 +110,11 @@ export const KINDS = {
 /** What a punch lands for when anyone brawls up close, in hp. */
 export const MELEE_DAMAGE = 14;
 
-/** A hostile low-poly figure: jacket + trim, legs, head, optional hat. */
+/** A hostile low-poly figure: jacket + trim, legs, head, optional hat.
+ *  Limbs hang from hip/shoulder pivots (userData.limbs) so update() can
+ *  swing the same walk cycle Rook and the pedestrians use. Arms are new —
+ *  the old static figure had none — and the pivot hierarchy stays fully
+ *  traversable, so the death fade and combat raycasts work unchanged. */
 function buildEnemyMesh(kind) {
   const group = new THREE.Group();
   const jacket = new THREE.MeshStandardMaterial({ color: kind.jacket, roughness: 0.8 });
@@ -118,28 +124,33 @@ function buildEnemyMesh(kind) {
   const hat = new THREE.MeshStandardMaterial({ color: kind.hat, roughness: 0.85 });
 
   const legGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.72, 6);
-  for (const lx of [0.16, -0.16]) {
-    const leg = new THREE.Mesh(legGeo, legs);
-    leg.position.set(lx, 0.36, 0);
-    group.add(leg);
-  }
+  const legL = limb(group, 0.16, 0.72, legGeo, legs, 0.72);
+  const legR = limb(group, -0.16, 0.72, legGeo, legs, 0.72);
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.72, 8), jacket);
   body.position.y = 0.98;
   group.add(body);
   const trimBand = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.12, 8), trim);
-  trimBand.position.y = 1.28;
-  group.add(trimBand);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), skin);
+  trimBand.position.y = 0.3;   // rides the torso so the counter-sway carries it
+  body.add(trimBand);
+  const armGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.7, 5);
+  const armL = limb(group, 0.4, 1.45, armGeo, jacket, 0.7);
+  const armR = limb(group, -0.4, 1.45, armGeo, jacket, 0.7);
+  // Head on a neck pivot so the step bob carries the hat with it.
+  const head = new THREE.Group();
   head.position.y = 1.6;
-  group.add(head);
+  head.userData.baseY = 1.6;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), skin);
+  head.add(skull);
   if (kind.hat !== undefined) {
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.1, 8), hat);
-    cap.position.y = 1.82;
-    group.add(cap);
+    cap.position.y = 0.22;
+    head.add(cap);
     const brim = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.28), hat);
-    brim.position.set(0, 1.78, 0.15);
-    group.add(brim);
+    brim.position.set(0, 0.18, 0.15);
+    head.add(brim);
   }
+  group.add(head);
+  group.userData.limbs = { legL, legR, armL, armR, head, body };
   return group;
 }
 
@@ -166,6 +177,7 @@ function makeEnemy(kind, spawn, scene, rng) {
   group.add(marker);
   group.position.copy(spawn);
   const pos = group.position.clone();
+  const heading = rand(rng, 0, Math.PI * 2);
   const enemy = {
     kind,
     def: k,
@@ -173,7 +185,7 @@ function makeEnemy(kind, spawn, scene, rng) {
     fig: mesh,
     marker,
     pos,
-    heading: rand(rng, 0, Math.PI * 2),
+    heading,
     home: spawn.clone(),
     alive: true,
     health: 100,
@@ -182,6 +194,10 @@ function makeEnemy(kind, spawn, scene, rng) {
     fall: 0,
     fade: 0,
     money: Math.round(k.loot[0] + (k.loot[1] - k.loot[0]) * rng()),
+    // Gait: reuse the spawn facing as the starting phase so crews desync
+    // without drawing extra values from the seeded rng chain.
+    phase: heading,
+    amp: 0,
   };
   scene.add(group);
   return enemy;
@@ -295,6 +311,7 @@ export function createEnemies(scene, city, rng) {
           const aimAng = toward + miss;
           const dvec = new THREE.Vector3(Math.sin(aimAng), 0, Math.cos(aimAng));
           shots.push({ origin: o, dir: dvec, damage: e.def.damage, from: e });
+          sfx.play('enemyShot');   // distant return fire, quieter than Rook's
         }
       }
 
@@ -308,6 +325,15 @@ export function createEnemies(scene, city, rng) {
       e.mesh.rotation.x = 0;
       e.mesh.position.y = 0;
       e.marker.position.set(0, MARKER_Y, 0);
+      // --- Visual-only walk cycle: swing the pivot limbs at the speed this
+      // enemy is actually moving (chase, flee or backing off). The gait
+      // amount eases to 0 when it stops, so idle figures stand neutral.
+      // Never feeds back into pos, heading, AI state or the shots above.
+      const gaitT = speed > 0.01 ? 1 : 0;
+      e.amp += (gaitT - e.amp) * Math.min(1, dt * 8);
+      e.phase += speed * dt * STRIDE;
+      if (e.phase > Math.PI * 2) e.phase -= Math.PI * 2;
+      swingWalk(e.fig.userData.limbs, e.phase, e.amp);
     }
 
     list.length = 0;

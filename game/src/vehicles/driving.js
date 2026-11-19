@@ -1,6 +1,7 @@
 // LUMEN BAY arcade driving: throttle/brake/reverse, speed-sensitive steering,
 // handbrake drift, nitro, fuel, condition, and a chase camera.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { WORLD, CAR, CAMERA } from '../config.js';
 import { buildCarMesh, makeGlowTexture } from './cars.js';
 
@@ -39,6 +40,49 @@ function collideCity(pos, r, speed) {
   if (xPush <= zPush) pos.x = nx.line + Math.sign(nx.d) * (WORLD.road / 2 - r);
   else pos.z = nz.line + Math.sign(nz.d) * (WORLD.road / 2 - r);
   return speed > 14 ? Math.min(1, (speed - 14) / 28) : 0;
+}
+
+/** Fraction of the XZ segment (ox,oz)->(tx,tz) that stays inside the union
+ *  of city.colliders. Those AABBs ({x,z,w,d}) are the road strips, so the
+ *  segment leaving their union is the moment it enters a building block.
+ *  Returns 1 when fully clear, otherwise the exit fraction in [0,1]. */
+function roadUnionExit(colliders, ox, oz, tx, tz) {
+  const dx = tx - ox;
+  const dz = tz - oz;
+  const spans = [];
+  for (const b of colliders) {
+    const minX = b.x - b.w / 2, maxX = b.x + b.w / 2;
+    const minZ = b.z - b.d / 2, maxZ = b.z + b.d / 2;
+    let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-9) {
+      if (ox < minX || ox > maxX) continue;
+    } else {
+      let a = (minX - ox) / dx, c = (maxX - ox) / dx;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    if (Math.abs(dz) < 1e-9) {
+      if (oz < minZ || oz > maxZ) continue;
+    } else {
+      let a = (minZ - oz) / dz, c = (maxZ - oz) / dz;
+      if (a > c) { const s = a; a = c; c = s; }
+      t0 = Math.max(t0, a); t1 = Math.min(t1, c);
+      if (t0 > t1) continue;
+    }
+    spans.push([t0, t1]);
+  }
+  if (!spans.length) return 0;
+  spans.sort((a, b) => a[0] - b[0]);
+  if (spans[0][0] > 0) return 0;   // origin off the road union: no clearance
+  // Merge overlapping spans; the merged span covering t=0 (the car is
+  // always on a road) ends where the segment first leaves the road union.
+  let end = spans[0][1];
+  for (let i = 1; i < spans.length; i += 1) {
+    if (spans[i][0] > end) break;
+    end = Math.max(end, spans[i][1]);
+  }
+  return Math.min(1, end);
 }
 
 /** Arcade driving controller. `state` is the shared game state, `city` carries
@@ -134,7 +178,9 @@ export function createDriver(state, city, scene) {
   function enterCar(carDef, position, startHeading = 0) {
     if (car) return;
     def = carDef;
-    car = buildCarMesh(def);
+    // Rook rides visible at the wheel: the seated driver is visual only.
+    // The ?stage=chase cover enters through here too, so it inherits him.
+    car = buildCarMesh(def, { driver: true });
     pos.copy(position);
     pos.y = 0;
     // Optional facing for live staging (?stage=chase); normal play always 0.
@@ -153,6 +199,8 @@ export function createDriver(state, city, scene) {
 
   function exitCar() {
     if (!car) return null;
+    sfx.stopEngine();   // engine loop lives only while driving
+    sfx.setSkid(false);
     scene.remove(car);
     clearSmoke();      // no frozen puffs left hanging over the road
     heroCam = false;   // staged framing ends with the staged drive
@@ -166,8 +214,12 @@ export function createDriver(state, city, scene) {
     updateSmoke(dt);
     if (!car) {
       speed = 0;
+      sfx.stopEngine();   // no car, no engine loop
+      sfx.setSkid(false);
       return;
     }
+    // Horn: one-shot from the pressed set (input.snapshot consumes KeyQ).
+    if (input.honk) sfx.play('horn');
     const top = def.topSpeed;
     const accel = def.accel;
 
@@ -217,6 +269,7 @@ export function createDriver(state, city, scene) {
       driftScore *= 1 - dt * 2;
       skid = 0;
     }
+    sfx.setSkid(drifting);   // filtered-noise scrape while the rear slides
 
     // --- Tire smoke: hard launches (wheelspin off the line) and drifts.
     // Capped at ~30 puffs/s and SMOKE_MAX sprites; purely visual. A totaled
@@ -243,6 +296,7 @@ export function createDriver(state, city, scene) {
     if (dmg > 0) {
       condition = Math.max(0, condition - dmg * 10);
       speed *= 0.92;
+      sfx.play('crash', { vol: 0.5 + dmg * 0.5 });   // harder hit, louder thump
     }
 
     car.position.copy(pos);
@@ -282,6 +336,12 @@ export function createDriver(state, city, scene) {
       state.speedKmh = Math.round(speedKmh());
       state.driftScore = driftScore;
     }
+
+    // --- Engine audio: pitch tracks road speed, throttle loads it, nitro
+    // raises it further. The loop lives only while driving (exitCar/pause
+    // call stopEngine); a stalled or totaled car still idles quietly. ---
+    const nitroOn = input.jump && speed > 2 && nitro > 0;
+    sfx.setEngine(speedKmh(), (input.up || input.down) ? 1 : 0, nitroOn);
   }
 
   /** Chase camera: smooth follow behind the car; FOV widens with speed.
@@ -295,7 +355,7 @@ export function createDriver(state, city, scene) {
       const fz = Math.cos(heading);
       const rx = -Math.cos(heading);   // screen-right of the travel direction
       const rz = Math.sin(heading);
-      const back = 10.5;
+      const back = 8.0;
       const side = 4.0;
       // Camera sits on the left kerb of the travel direction and looks
       // across the car toward the sun side, so the ocean glow leads the
@@ -306,11 +366,12 @@ export function createDriver(state, city, scene) {
         pos.z - fz * back - rz * side
       );
       // Look ahead of the car, biased toward the sun and lifted so the
-      // frame spans the low car AND the heli hovering 40m above it, with
-      // margin under the top HUD strip.
+      // frame spans the low car AND the heli hovering 40m directly above
+      // it. 13m keeps the heli (and its rotor) inside the 94° frame at this
+      // 8m pull-back — 12m cuts it above the top edge.
       camera.lookAt(
         pos.x + fx * 10 + rx * 3,
-        pos.y + 15.5,
+        pos.y + 13,
         pos.z + fz * 10 + rz * 3
       );
       camera.fov += (94 - camera.fov) * Math.min(1, dt * 4);
@@ -319,15 +380,36 @@ export function createDriver(state, city, scene) {
     }
     const back = 6.5 + speedKmh() * 0.05;
     const up = 2.6 + speedKmh() * 0.02;
-    const bx = pos.x - Math.sin(heading) * back;
-    const bz = pos.z - Math.cos(heading) * back;
-    const by = pos.y + up;
+    let bx = pos.x - Math.sin(heading) * back;
+    let bz = pos.z - Math.cos(heading) * back;
+    let by = pos.y + up;
+    // Occlusion: cast from the car to the desired camera spot against the
+    // road-strip AABBs (city.colliders); where the segment leaves the road
+    // union, pull the target in to hit distance minus a margin. Only ever
+    // shortens the distance — the lerp smoothing below is unchanged.
+    if (city.colliders && city.colliders.length) {
+      const hx = pos.x, hy = pos.y + 1.2, hz = pos.z;
+      const t = roadUnionExit(city.colliders, hx, hz, bx, bz);
+      if (t < 1) {
+        const dx = bx - hx, dz = bz - hz;
+        const len = Math.hypot(dx, dz);
+        // Margin covers the 0.5 near plane; the 3.0 floor keeps the camera
+        // behind the car's rear bumper (body half-length ~2.05) when the car
+        // sits at a road edge. Building faces are 5.4m inside the block
+        // edge, so this stays clear of them.
+        const allow = len > 1e-6 ? Math.min(len, Math.max(3.0, t * len - 0.6)) / len : 0;
+        bx = hx + dx * allow;
+        bz = hz + dz * allow;
+        by = hy + (by - hy) * allow;
+      }
+    }
     // Ease position and look toward the same targets as before — only the
     // approach is smoothed, so turns swing instead of snapping.
     const k = Math.min(1, dt * 8);
     camera.position.x += (bx - camera.position.x) * k;
     camera.position.y += (by - camera.position.y) * k;
     camera.position.z += (bz - camera.position.z) * k;
+    if (camera.position.y < 0.5) camera.position.y = 0.5;
     const tx = pos.x, ty = pos.y + 1.2, tz = pos.z;
     let look = camera.userData.driveLook;
     if (!look) { look = new THREE.Vector3(tx, ty, tz); camera.userData.driveLook = look; }

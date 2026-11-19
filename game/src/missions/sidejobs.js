@@ -4,6 +4,7 @@
 // Jobs are repeatable; shells are one-per-run and pay a flat $100 each.
 // Conch shells sit at fixed city spots; walk within 3m to pick one up.
 import * as THREE from 'three';
+import * as sfx from '../audio/sfx.js';
 import { SHELLS, SIDE_JOBS, SHELL_TOTAL, districtPoint, snapToRoad } from './catalog.js';
 
 const PICKUP_RANGE = 8;   // metres: reach a stop/target
@@ -94,6 +95,7 @@ export function createSideJobs(state, world, hooks = {}) {
   /** Side job finished: pay the bonus and clear the runtime state. */
   function payJob() {
     const payout = job.def.payout || 0;
+    sfx.play('pickup');   // job payout blip
     if (hooks.addMoney) hooks.addMoney(payout);
     else if (state) { state.money += payout; }
     if (hooks.onPayout) hooks.onPayout(payout);
@@ -143,6 +145,7 @@ export function createSideJobs(state, world, hooks = {}) {
         if (flatDist(playerPos, sh.pos) <= SHELL_RANGE) {
           sh.taken = true;
           if (scene) scene.remove(sh.mesh);
+          sfx.play('pickup');   // conch shell blip
           state.shells = (state.shells || 0) + 1;
           if (hooks.addMoney) hooks.addMoney(SHELL_AMOUNT);
           else state.money += SHELL_AMOUNT;

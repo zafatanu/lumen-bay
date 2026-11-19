@@ -5,6 +5,8 @@
 // and all interaction lives in the menu/map/pause overlays. No network.
 import { WORLD, DISTRICTS, CAR, POLICE } from '../config.js';
 import { WEAPONS } from '../combat/weapons.js';
+import { SHELLS, MISSIONS, CHARACTERS } from '../missions/catalog.js';
+import { drawPortrait } from '../missions/characters.js';
 
 const MINIMAP = 192;          // canvas px square
 const WORLD_W = WORLD.total;  // island span in metres
@@ -18,6 +20,14 @@ export function createHud(state, dom, opts = {}) {
   const arsenal = opts.arsenal;
   const radio = opts.radio;
   const police = opts.police;
+  // Live job-giver markers from main.js ({pos,label,kind}); empty if absent.
+  const getMarkers = opts.getMarkers || (() => []);
+  // Live conch-shell handles from main.js (placeShells(): {mesh,pos,taken},
+  // in catalog SHELLS order); empty if absent. The minimap plots the real
+  // catalog coordinates and skips the handles flagged taken.
+  const getShells = opts.getShells || (() => []);
+  // Accumulated display time for the pulsing story-marker blip.
+  let hudTime = 0;
 
   // ---- DOM handles for the static panels ---------------------------------
   const missionTitle = $('[data-hud="mission-title"]');
@@ -33,6 +43,9 @@ export function createHud(state, dom, opts = {}) {
   const repTier = $('[data-hud="rep-tier"]');
   const repFill = $('[data-hud="rep-fill"]');
   const wantedRow = $('[data-hud="wanted-stars"]');
+  const wantedBanner = $('[data-hud="wanted-banner"]');
+  const wantedBannerStars = $('[data-hud="wanted-banner-stars"]');
+  const wantedSight = $('[data-hud="wanted-sight"]');
   const moneyEl = $('[data-hud="money"]');
   const clockEl = $('[data-hud="clock"]');
   const speedoKmh = $('[data-hud="speedo-kmh"]');
@@ -50,6 +63,42 @@ export function createHud(state, dom, opts = {}) {
   const radioStation = $('[data-hud="radio-station"]');
   const radioTrack = $('[data-hud="radio-track"]');
   const popupsEl = $('[data-hud="popups"]');
+
+  // ---- Crew chip row (P10) ------------------------------------------------
+  // The three ACTIVE crew — Mama Luz (fixer), Tito (mechanic), Ivy (hacker):
+  // the mission givers who run Rook's jobs. Rook is the player behind the
+  // wheel; Solano and Kestrel are the antagonists, not crew. The catalog
+  // cast is pure narrative data (catalog.js CHARACTERS: name/role/district/
+  // colour/bio) with NO ability, passive or cooldown mechanics anywhere in
+  // the sim, so the chips show portrait + name + role only — never invented
+  // keybinds or cooldowns. The fourth chip is the car's live condition,
+  // refreshed by updateSpeedo (the car panel) each frame.
+  const crewEl = $('[data-hud="crew"]');
+  const CREW_NAMES = ['Mama Luz', 'Tito', 'Ivy'];
+  if (crewEl) {
+    let html = '';
+    for (const name of CREW_NAMES) {
+      const c = CHARACTERS.find((x) => x.name === name);
+      html += `<div class="crew-chip">
+        <img class="crew-img" src="${drawPortrait(name)}" alt="">
+        <span class="crew-txt">
+          <span class="crew-name">${name.toUpperCase()}</span>
+          <span class="crew-role">${c ? c.role : ''}</span>
+        </span>
+      </div>`;
+    }
+    html += `<div class="crew-chip crew-cond">
+      <span class="crew-txt">
+        <span class="crew-name" data-hud="crew-car">ON FOOT</span>
+        <span class="crew-role">CONDITION <span data-hud="crew-cond-pct">0%</span></span>
+        <span class="bar cond crew-bar"><span class="fill" data-hud="crew-cond-fill"></span></span>
+      </span>
+    </div>`;
+    crewEl.innerHTML = html;
+  }
+  const crewCar = $('[data-hud="crew-car"]');
+  const crewCondPct = $('[data-hud="crew-cond-pct"]');
+  const crewCondFill = $('[data-hud="crew-cond-fill"]');
 
   // --hud-draw-- marker: minimap drawing helpers append below
 
@@ -73,17 +122,23 @@ export function createHud(state, dom, opts = {}) {
     return best.name;
   }
 
-  /** Draw the road grid as light lines over a sea-tinted backing. */
+  /** Draw the road grid as cased streets — dark under-stroke + pale centre
+   *  line over a sea-tinted backing — so the minimap reads as streets, not
+   *  faint scratches. Size, position and blips are unchanged. */
   function drawGrid() {
     mmCtx.fillStyle = '#0b2a38';
     mmCtx.fillRect(0, 0, MINIMAP, MINIMAP);
-    mmCtx.strokeStyle = 'rgba(150,210,235,0.55)';
-    mmCtx.lineWidth = 2;
-    const step = Math.round((WORLD.block + WORLD.road) * (MINIMAP / WORLD_W));
-    for (let i = 0; i <= WORLD.blocks; i += 1) {
-      const p = toPx(-WORLD_W / 2 + i * (WORLD.block + WORLD.road), 0).px;
-      mmCtx.beginPath(); mmCtx.moveTo(p, 0); mmCtx.lineTo(p, MINIMAP); mmCtx.stroke();
-      mmCtx.beginPath(); mmCtx.moveTo(0, p); mmCtx.lineTo(MINIMAP, p); mmCtx.stroke();
+    for (const pass of [
+      { style: 'rgba(18,24,40,0.9)', width: 4.5 },
+      { style: 'rgba(150,210,235,0.7)', width: 2 },
+    ]) {
+      mmCtx.strokeStyle = pass.style;
+      mmCtx.lineWidth = pass.width;
+      for (let i = 0; i <= WORLD.blocks; i += 1) {
+        const p = toPx(-WORLD_W / 2 + i * (WORLD.block + WORLD.road), 0).px;
+        mmCtx.beginPath(); mmCtx.moveTo(p, 0); mmCtx.lineTo(p, MINIMAP); mmCtx.stroke();
+        mmCtx.beginPath(); mmCtx.moveTo(0, p); mmCtx.lineTo(MINIMAP, p); mmCtx.stroke();
+      }
     }
     mmCtx.strokeStyle = '#2ae0c0';
     mmCtx.strokeRect(0.5, 0.5, MINIMAP - 1, MINIMAP - 1);
@@ -136,17 +191,45 @@ export function createHud(state, dom, opts = {}) {
     mmCtx.restore();
   }
 
-  /** Redraw the whole minimap: grid, shells, mission target, police, player. */
+  /** A pulsing gold diamond for the story job-giver, with a faint halo ring
+   *  so it reads as "go here" even at minimap scale. */
+  function storyBlip(x, z) {
+    const { px, py } = toPx(x, z);
+    const r = 3.6 + Math.sin(hudTime * 2.6) * 1.1;
+    mmCtx.strokeStyle = 'rgba(255,194,74,0.5)';
+    mmCtx.lineWidth = 1;
+    mmCtx.beginPath();
+    mmCtx.arc(px, py, r + 2.6, 0, Math.PI * 2);
+    mmCtx.stroke();
+    mmCtx.fillStyle = '#ffc24a';
+    mmCtx.beginPath();
+    mmCtx.moveTo(px, py - r);
+    mmCtx.lineTo(px + r, py);
+    mmCtx.lineTo(px, py + r);
+    mmCtx.lineTo(px - r, py);
+    mmCtx.closePath();
+    mmCtx.fill();
+  }
+
+  /** Redraw the whole minimap: grid, shells, markers, mission target, police, player. */
   function drawMinimap() {
     if (!mmCtx) return;
     const p = player();
     drawGrid();
-    // Collectible shells: amber dots, once the player has found a few.
-    const found = state.shells || 0;
-    for (let i = 0; i < Math.min(6, found); i += 1) {
-      const sx = -WORLD_W / 2 + (i * 91) % WORLD_W;
-      const sz = -WORLD_W / 2 + (i * 173) % WORLD_W;
-      blip(sx, sz, '#ffd9a0');
+    // Collectible shells: amber dots at the REAL catalog spots (SHELLS from
+    // missions/catalog.js — the same coordinates placeShells() meshes sit at).
+    // A shell drops off the minimap once its live handle is flagged taken,
+    // so the blips always match what is still out on the island.
+    const shellHandles = getShells();
+    for (let i = 0; i < SHELLS.length; i += 1) {
+      if (shellHandles[i] && shellHandles[i].taken) continue;
+      blip(SHELLS[i].x, SHELLS[i].z, '#ffd9a0');
+    }
+    // Job-giver markers: pulsing gold diamond for the story mission, teal
+    // dots for the taxi / taco / race givers (same colours as the 3D signs).
+    for (const mk of getMarkers()) {
+      if (mk.kind === 'mission') storyBlip(mk.pos.x, mk.pos.z);
+      else blip(mk.pos.x, mk.pos.z, '#2ae0c0');
     }
     // Mission target / side-job target: a yellow diamond.
     const target = state.missionTarget || state.sideJobTarget;
@@ -177,7 +260,7 @@ export function createHud(state, dom, opts = {}) {
     const active = state.currentMission;
     if (!active) {
       if (missionTitle) missionTitle.textContent = '';
-      if (missionObj) missionObj.textContent = 'Free roam \u2014 press E at a sign to start a job.';
+      if (missionObj) missionObj.textContent = 'Free roam \u2014 follow the gold beacon and press E to start a job.';
       if (missionTimer) missionTimer.textContent = '';
       if (missionStage) missionStage.textContent = '';
       if (missionNext) missionNext.textContent = '';
@@ -191,7 +274,18 @@ export function createHud(state, dom, opts = {}) {
     if (missionObj) missionObj.textContent = obj;
     if (missionTimer) missionTimer.textContent = state.missionTimer != null ? `\u23F1 ${Math.ceil(state.missionTimer)}s` : '';
     if (missionStage) missionStage.textContent = state.missionStage || '';
-    if (missionNext) missionNext.textContent = state.missionStage ? `NEXT \u00b7 ${obj}` : '';
+    // NEXT row: the FOLLOWING stage's objective, read straight from the
+    // catalog (one short line per stage). state.missionStage is "STAGE n/N",
+    // so stages[n] is the next one (0-based). On the final stage — or when
+    // the active id isn't a catalog mission — the row stays empty; it never
+    // repeats the current objective line above it.
+    if (missionNext) {
+      let nextText = '';
+      const def = MISSIONS.find((mm) => mm.id === active);
+      const stageNo = parseInt(String(state.missionStage || '').replace(/^STAGE\s*/i, ''), 10);
+      if (def && Number.isFinite(stageNo) && def.stages[stageNo]) nextText = def.stages[stageNo].text;
+      missionNext.textContent = nextText ? `NEXT \u00b7 ${nextText}` : '';
+    }
   }
 
   /** Mid-left police roster: each unit name, distance in m, and AI state. */
@@ -225,14 +319,29 @@ export function createHud(state, dom, opts = {}) {
     }
   }
 
-  /** Top-right: wanted stars, money, day + clock. */
+  /** Top-right: wanted stars, money, day + clock, plus the WANTED banner
+   *  (star count + IN SIGHT chip) that shows whenever wanted >= 1. */
   function updateTopRight() {
+    const max = 5;
+    const lit = Math.max(0, Math.min(max, state.stars));
     if (wantedRow) {
-      const max = 5;
       let stars = '';
-      const lit = Math.max(0, Math.min(max, state.stars));
       for (let i = 0; i < max; i += 1) stars += i < lit ? '\u2605' : '\u2606';
       wantedRow.textContent = stars;
+    }
+    // WANTED banner: reuses the wanted controller's own sighting tracking —
+    // wanted.js resets hideTimer to 0 on every step a unit keeps eyes on Rook
+    // and records lastSeenPos, so hideTimer === 0 with a last-seen record
+    // means "in sight right now". No new state is invented here.
+    if (wantedBanner) {
+      if (lit > 0) {
+        wantedBanner.style.display = 'flex';
+        if (wantedBannerStars) wantedBannerStars.textContent = '\u2605'.repeat(lit);
+        const inSight = !!state.lastSeenPos && state.hideTimer === 0;
+        if (wantedSight) wantedSight.style.display = inSight ? '' : 'none';
+      } else {
+        wantedBanner.style.display = 'none';
+      }
     }
     if (moneyEl) moneyEl.textContent = '$' + Number(state.money).toLocaleString();
     if (clockEl) clockEl.textContent = `Day ${state.day} \u00b7 ${state.formatClock()}`;
@@ -241,7 +350,10 @@ export function createHud(state, dom, opts = {}) {
   // --hud-panels-2-- marker: second half of the panels append below
 
   /** Bottom-right speedometer: big km/h, car name, condition/nitro/fuel bars,
-   *  or an ON FOOT readout with the current weapon. */
+   *  or an ON FOOT readout with the current weapon. Also refreshes the crew
+   *  row's car-condition chip: that chip is car-derived, and this panel owns
+   *  the car readout (update()'s body is frozen by the P9 ghosting contract,
+   *  so the refresh rides here instead of adding a call there). */
   function updateSpeedo() {
     if (state.inCar && state.currentCar) {
       const car = state.currentCar;
@@ -251,6 +363,9 @@ export function createHud(state, dom, opts = {}) {
       if (nitroFill) nitroFill.style.width = Math.max(0, Math.min(100, car.nitro)) + '%';
       if (fuelFill) fuelFill.style.width = Math.max(0, Math.min(100, car.fuel)) + '%';
       if (onFootEl) onFootEl.style.display = 'none';
+      if (crewCar) crewCar.textContent = car.name.toUpperCase();
+      if (crewCondPct) crewCondPct.textContent = Math.round(Math.max(0, Math.min(100, car.condition))) + '%';
+      if (crewCondFill) crewCondFill.style.width = Math.max(0, Math.min(100, car.condition)) + '%';
     } else {
       if (speedoKmh) speedoKmh.textContent = '0';
       if (carName) carName.textContent = 'ON FOOT';
@@ -262,6 +377,9 @@ export function createHud(state, dom, opts = {}) {
         onFootEl.style.display = 'block';
         onFootEl.textContent = w;
       }
+      if (crewCar) crewCar.textContent = 'ON FOOT';
+      if (crewCondPct) crewCondPct.textContent = '—';
+      if (crewCondFill) crewCondFill.style.width = '0%';
     }
   }
 
@@ -300,10 +418,13 @@ export function createHud(state, dom, opts = {}) {
 
   /** Radio widget: station + frequency + current track (N cycles). Reads the
    *  live station from state (set by main.js from radio.current()) so the HUD
-   *  never depends on the radio object being wired up. */
+   *  never depends on the radio object being wired up. The radio.current()
+   *  fallback only applies once the synth is actually running — before the
+   *  first user gesture the widget honestly reads OFF AIR / press N. */
   function updateRadio() {
     if (!radioEl) return;
-    const cur = radio ? radio.current() : null;
+    const live = radio && typeof radio.isRunning === 'function' && radio.isRunning();
+    const cur = live ? radio.current() : null;
     const st = (state.radioStation || (cur ? `${cur.station} \u00b7 ${cur.freq} MHz` : ''));
     const tr = (state.radioTrack || (cur ? cur.track : ''));
     if (!st && !tr) {
@@ -315,25 +436,34 @@ export function createHud(state, dom, opts = {}) {
     radioTrack.textContent = tr;
   }
 
-  /** Centre-right score popups: drift, near miss, shell, mission payout. */
+  /** Centre-right score popups: drift, near miss, shell, mission payout.
+   *  Reconciled IN PLACE: rebuilding innerHTML every frame restarted each
+   *  popup's rise animation at its opacity-0 first keyframe, so popups never
+   *  actually painted. Existing nodes keep their animation; only text and
+   *  the fade class are touched, and nodes are added/removed as the list
+   *  changes. */
   function updatePopups() {
     if (!popupsEl) return;
     if (!state.popups) state.popups = [];
-    if (!state.popups.length) {
-      if (popupsEl.children.length) popupsEl.innerHTML = '';
-      return;
+    const list = state.popups;
+    while (popupsEl.children.length > list.length) popupsEl.removeChild(popupsEl.lastChild);
+    for (let i = 0; i < list.length; i += 1) {
+      const p = list[i];
+      let el = popupsEl.children[i];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'popup';
+        popupsEl.appendChild(el);
+      }
+      if (el.textContent !== p.text) el.textContent = p.text;
+      el.classList.toggle('pop-fade', p.t < 0.8);
     }
-    let html = '';
-    for (const p of state.popups) {
-      const fade = p.t < 0.8 ? ' pop-fade' : '';
-      html += `<div class="popup${fade}">${p.text}</div>`;
-    }
-    popupsEl.innerHTML = html;
   }
 
   // --hud-panels-3-- marker: all panels defined
 
   function update(dt) {
+    hudTime += dt;
     drawMinimap();
     updateMission();
     updatePolice();

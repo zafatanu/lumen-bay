@@ -54,9 +54,11 @@ export function createState() {
     settings: { volume: 1, music: true, minimap: true, shake: true },
     timePlayed: 0,
     // S6: the HUD radio widget reads these; main.js refreshes them from the
-    // WebAudio synth radio whenever the station or track changes.
-    radioStation: 'WAVE 88.1',
-    radioTrack: 'Midnight Circuit',
+    // WebAudio synth radio whenever the station or track changes. Empty by
+    // default: the synth only starts on the first user gesture, so the HUD
+    // shows its honest OFF AIR / press N fallback until then.
+    radioStation: '',
+    radioTrack: '',
   });
 
   const state = fresh();

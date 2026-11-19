@@ -5,6 +5,8 @@
 // state, driver, onFoot, arsenal, enemies, wanted, police, mission, sideJobs,
 // input, scene, camera, traffic, hud, plus setScreen/ensureRadio/stepWorld.
 import { STEP } from './config.js';
+import { roadRingAround } from './combat/enemies.js';
+import { drawPortrait } from './missions/characters.js';
 
 export const SHOT_SCENES = ['1-chase', '2-shootout', '3-menu', '4-map'];
 
@@ -162,6 +164,10 @@ function stageChase(ctx) {
   state.driftScore += 200;
   state.money += 100;
 
+  // Cover dialogue: Mama Luz on the radio, portrait + name + line on the HUD
+  // dialogue panel (hud.js updateDialogue) for the whole capture window.
+  state.dialogue = { who: 'Mama Luz', line: 'Lose them on the coast road, Rook — the heli can\u2019t follow you into the Marina.', portrait: drawPortrait('Mama Luz') };
+
   ctx.setScreen('play');
   ctx.hud.update(STEP);
   ctx.update(STEP, state.clockMinutes);
@@ -170,19 +176,23 @@ function stageChase(ctx) {
 
 // --shots-shootout-- marker: shootout scene appends below
 
-/** On-foot shootout in Dockside at dusk: Rook behind cover with the Tide SMG,
- *  three Gulls closing with hostile markers overhead, health + armour bars
- *  live, crosshair on, and a muzzle flash caught mid-frame from the last
- *  trigger pull. */
+/** On-foot shootout on the west coast road at golden hour: Rook braced on
+ *  the coastal E-W street the chase cover uses, facing west into the low sun
+ *  over the ocean, four standing Gulls in two ranks down the asphalt plus
+ *  one downed mid-topple in frame, hostile markers overhead, two wanted
+ *  stars on the HUD, health + armour bars live, crosshair on the pointer,
+ *  and a muzzle flash + tracer caught mid-frame from the sustained trigger
+ *  hold. */
 function stageShootout(ctx) {
-  const { state, onFoot, arsenal, enemies, combat, scene, camera } = ctx;
+  const { state, onFoot, arsenal, enemies, wanted, scene, camera } = ctx;
 
-  freshState(ctx, { doneThrough: 3, money: 12300, day: 1, rep: 3, repXp: 60 });
+  freshState(ctx, { doneThrough: 2, money: 12300, day: 1, rep: 3, repXp: 60 });
   ctx.applySettings();
   ctx.ensureRadio();
 
-  // Rook on foot on a Dockside road, braced for a fight.
-  const px = 229;
+  // Rook on foot on the west coast road (the asphalt band z -74..-60),
+  // facing west: the low sun and the ocean sit at the end of the street.
+  const px = -190;
   const pz = -67;
   onFoot.setPosition({ x: px, y: 0, z: pz }, -Math.PI / 2);
   onFoot.show();
@@ -196,21 +206,97 @@ function stageShootout(ctx) {
   // Health + armour bars read as a fight already in progress.
   state.health = 78;
   state.armour = 46;
+  state.clockMinutes = 17 * 60 + 42;   // golden hour, ahead of the night blend
 
-  // Three Gulls stand down the road, hostile markers up. High health so
-  // sustained fire during capture does not clear the scene before the shot.
-  for (let i = 0; i < 3; i += 1) {
-    enemies.spawnEnemy('gull', { x: px - 9 - i * 3, z: pz }, { health: 500 });
-  }
+  // Two-star heat: stars lit on the HUD with the heat bar part-way up. 40 is
+  // the 2-star floor; the trigger hold adds ~32 heat, staying under the
+  // 3-star threshold (74) so no helicopter joins the frame.
+  wanted.setStars(2);
+  state.stars = 2;
+  state.heat = 40;
 
-  // Frame the fight head-on: the camera already swings to aim via combat.
-  camera.lookAt(px - 10, 1.2, pz);
+  // Mission panel: Dockside Run, the stage where the Gulls get cleared off
+  // the crates — the fight itself reads without the text.
+  state.currentMission = 'Dockside Run';
+  state.missionStage = 'STAGE 2/3';
+  state.missionNext = 'STAGE 2/3: Clear the Gulls off the crates';
+  state.missionTimer = null;
+
+  // Five Gulls down the coast road, placed with the shared road-ring helper
+  // (enemies.js): a full circle of road points (count 12, so enough survive
+  // the filter) centred just west of Rook, kept only where they sit WEST of
+  // him inside the asphalt band z -74..-60, then the five nearest by
+  // distance — a near pair and a far pair, depth AND lateral spread, plus
+  // the nearest Gull dead ahead, staged to drop at capture (below). All on
+  // the asphalt, all health 500: the four main Gulls stay standing through
+  // the sustained fire of the hold.
+  const ring = roadRingAround({ x: px - 12, z: pz }, 12, 12);
+  const gullSpots = ring
+    .filter((g) => g.x < px - 4 && g.z >= -74 && g.z <= -60)
+    .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))
+    .slice(0, 5);
+  const gulls = gullSpots.map((g) => enemies.spawnEnemy('gull', { x: g.x, z: g.z }, { health: 500 }));
+  const fifth = gulls[0];   // the nearest Gull: downed in frame at capture
+
+  // Start the hold from the settled on-foot framing so no boot-camera swoop
+  // crosses the staged fight. The aim/camera logic itself is untouched.
+  camera.position.set(px + 3.4, 3.1, pz);
+  camera.lookAt(px, 1.0, pz);
+  camera.fov = 55;
+  camera.updateProjectionMatrix();
 
   // ~1.6s of real combat: Rook holds the trigger so a muzzle flash is live.
   for (let i = 0; i < 96; i += 1) {
     ctx.stepWorld(STEP, shootSnap(true));
   }
 
+  // Re-assert the staged fight state so the HUD reads it at capture.
+  wanted.setStars(2);
+  state.stars = 2;
+  state.heat = 44;
+  state.health = 78;
+  state.armour = 46;
+
+  // One Gull down in frame: the nearest of the five takes a killing hit now,
+  // so the capture catches it mid-topple (0.7s fall + 0.6s fade, enemies.js)
+  // while the four main Gulls stay standing. The mission panel counts it.
+  enemies.damage(fifth, 999);
+  // The capture freeze holds step(), so the fall timer never advances on its
+  // own and the body would stay upright at t=0. Pose it at the SAME rotation
+  // the live fall computes (enemies.js: t = 1 - fall/FALL_TIME), 55% through
+  // the topple — clearly dropping, marker still up (it hides only in fade).
+  {
+    const fallTime = fifth.fall;   // FALL_TIME, as damage() just set it
+    fifth.fall = fallTime * 0.45;
+    fifth.mesh.rotation.x = Math.min(Math.PI / 2, (1 - fifth.fall / fallTime) * Math.PI / 2);
+  }
+  state.missionNext = 'STAGE 2/3: Clear the Gulls off the crates · 1 down';
+
+  // Refill again right before the capture frame: a mid-hold reload must not
+  // blank the flash at capture. refillAll() drops back to the pistol, so
+  // re-select the Tide SMG (slot 2) after it.
+  arsenal.refillAll();
+  arsenal.select(2);
+
+  // Capture framing, set through the live camera's own state only: the
+  // follow camera swings to aim and orbits Rook (combat.js + onfoot.js),
+  // so seed it just off his shoulder with an 80° cover lens (the chase
+  // frames at ~94) that eases back to the play FOV on its own. Across the
+  // capture window that holds the whole Gull arc, the hostile markers, the
+  // low sun and the sunset horizon over the ocean at the end of the coast
+  // road in frame, with Rook facing west into the sun. Normal play never
+  // sets any of this.
+  onFoot.setPosition({ x: px, y: 0, z: pz }, -Math.PI / 2);
+  const camBearing = 90 * (Math.PI / 180);
+  camera.position.set(px + Math.sin(camBearing) * 4.0, 3.1, pz + Math.cos(camBearing) * 4.0);
+  if (camera.userData.followLook) camera.userData.followLook.set(px, 1.0, pz);
+  camera.lookAt(px, 1.0, pz);
+  camera.fov = 80;
+  camera.updateProjectionMatrix();
+
+  // Belt-and-braces for the exact capture frame: one forced muzzle flash on
+  // top of the ~11/s the sustained trigger hold already produces.
+  ctx.combat.flashMuzzle();
   ctx.setScreen('play');
   ctx.hud.update(STEP);
   ctx.update(STEP, state.clockMinutes);
@@ -237,6 +323,12 @@ function stageMenu(ctx) {
   ctx.applySettings();
   ctx.ensureRadio();
 
+  // Persist the staged career through the REAL save path so the menu's
+  // CONTINUE button reads enabled with the mid-story summary (menu.js gates
+  // it on localStorage, not on state). Staging only: same save format, and
+  // every other shot resets state without loading it.
+  state.save();
+
   // Open the menu screen; menuRefresh() rebuilds CONTINUE from the save above.
   ctx.setScreen('menu');
 
@@ -250,7 +342,7 @@ function stageMenu(ctx) {
  *  career stats and the legend in the side panel, player + police blips on
  *  the canvas. */
 function stageMap(ctx) {
-  const { state } = ctx;
+  const { state, scene } = ctx;
 
   // A mid-story career for the stats panel + mission list.
   freshState(ctx, { doneThrough: 4, money: 31420, day: 2, rep: 4, repXp: 175 });
@@ -259,6 +351,18 @@ function stageMap(ctx) {
   state.takedowns = 9;
   state.escapes = 5;
   state.playSeconds = 3874;
+
+  // Staged consistency: the panel reads 6/24 conches, so the six west-coast
+  // shells (catalog order 0-5 — the coast route a fresh run walks first)
+  // are flagged taken on their LIVE placeShells() handles and their meshes
+  // dropped, so the map blips show the 18 still out there. Staging only:
+  // live pickup logic, state.shells and the save format are untouched.
+  if (ctx.shells) {
+    for (let i = 0; i < 6 && i < ctx.shells.length; i += 1) {
+      ctx.shells[i].taken = true;
+      scene.remove(ctx.shells[i].mesh);
+    }
+  }
 
   ctx.applySettings();
   ctx.ensureRadio();

@@ -9,9 +9,12 @@ const WORLD_W = WORLD.total; // island span in metres
 
 /** Build the full map screen inside #map-screen. Returns { open, close }.
  *  `player` -> {x,z} current world position for the player marker;
- *  `police` -> optional { units() } provider for live police blips.
+ *  `police` -> optional { units() } provider for live police blips;
+ *  `markers` -> () => job-giver marker list ({pos,label,kind}) from main.js;
+ *  `getShells` -> () => live conch handles ({mesh,pos,taken}, catalog SHELLS
+ *  order) from placeShells(), so blips mark exactly the untaken shells.
  */
-export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null) {
+export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null, markers = () => [], getShells = () => []) {
   const dom = document.getElementById('map-screen');
   if (!dom) return { open: () => {}, close: () => {} };
 
@@ -39,62 +42,191 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
     // --map-done-- marker: done
   }
 
-  /** Fill the sea, then the sand strip, then each district's building lot. */
+  /** Sea, organic coastline, sand fringe, per-block lots, cased roads and
+   *  bridges — layered so the screen reads as an island with streets. */
   function drawIsland(ctx) {
-    // Sea: deep blue out to the map edge.
-    ctx.fillStyle = '#0b2a38';
+    // Sea: depth gradient — lighter turquoise near the shore, deep blue-teal
+    // out at the canvas edge.
+    const sea = ctx.createRadialGradient(MAP / 2, MAP / 2, MAP * 0.22, MAP / 2, MAP / 2, MAP * 0.72);
+    sea.addColorStop(0, '#1d7a86');
+    sea.addColorStop(0.55, '#12505f');
+    sea.addColorStop(1, '#081e2e');
+    ctx.fillStyle = sea;
     ctx.fillRect(0, 0, MAP, MAP);
+    drawWaves(ctx);
 
-    // Beach along the west (x-negative) edge, a narrow sand band.
-    const beachHalf = 30;
-    const b0 = toPx(-WORLD_W / 2, 0);
-    const b1 = toPx(-WORLD_W / 2 + beachHalf, 0);
-    ctx.fillStyle = '#e8d9a8';
-    ctx.fillRect(b0.px, 0, b1.px - b0.px, MAP);
+    // Land: rounded-corner coastline inset from the frame, with a west cove
+    // (Coral Beach side) and a south inlet. The sand fill doubles as the thin
+    // sand ring around the whole coast; the pale stroke is the surf line.
+    traceLand(ctx);
+    ctx.strokeStyle = 'rgba(140,225,235,0.4)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#dfcb9b';
+    ctx.fill();
 
-    // District blocks: pastel lots in the district's palette colour.
-    for (const d of DISTRICTS) {
-      const cx = d.centre.x;
-      const cz = d.centre.z;
-      const half = WORLD.block / 2 + WORLD.road;
-      const a = toPx(cx - half, cz - half);
-      const b = toPx(cx + half, cz + half);
-      ctx.fillStyle = d.palette[0];
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(a.px, a.py, b.px - a.px, b.py - a.py);
-      ctx.globalAlpha = 1;
+    // Wider west beach band (Coral Beach side), clipped to the coastline.
+    ctx.save();
+    traceLand(ctx);
+    ctx.clip();
+    ctx.fillStyle = '#ecd9a6';
+    ctx.fillRect(0, 0, 46, MAP);
+    ctx.restore();
+
+    // Per-block lots: the same 8x8 walk as city.js createCity() — block
+    // centre at westEdge + (g + 0.5) * (block + road), district = nearest
+    // hub — tinted darker/desaturated so the cased roads sit on top.
+    ctx.save();
+    traceLand(ctx);
+    ctx.clip();
+    const step = WORLD.block + WORLD.road;
+    const half = WORLD.block / 2;
+    for (let gy = 0; gy < WORLD.blocks; gy += 1) {
+      for (let gx = 0; gx < WORLD.blocks; gx += 1) {
+        const cx = -WORLD_W / 2 + (gx + 0.5) * step;
+        const cz = -WORLD_W / 2 + (gy + 0.5) * step;
+        let best = DISTRICTS[0];
+        let bestD = Infinity;
+        for (const d of DISTRICTS) {
+          const dist = (d.centre.x - cx) ** 2 + (d.centre.z - cz) ** 2;
+          if (dist < bestD) { bestD = dist; best = d; }
+        }
+        const a = toPx(cx - half, cz - half);
+        const b = toPx(cx + half, cz + half);
+        ctx.fillStyle = lotTint(best.palette[(gx + gy) % best.palette.length]);
+        ctx.fillRect(a.px, a.py, b.px - a.px, b.py - a.py);
+      }
     }
-
     drawRoads(ctx);
+    ctx.restore();
+
+    drawBridges(ctx);
     drawFerris(ctx);
     drawDistrictLabels(ctx);
+    // Island frame (outside the land clip so it rings the whole canvas).
+    ctx.strokeStyle = '#2ae0c0';
+    ctx.strokeRect(0.5, 0.5, MAP - 1, MAP - 1);
     // --map-blips-- marker: markers/player drawn after roads
   }
 
-  /** The road grid: one ring road around each block, lighter lane lines. */
+  /** The road grid: each centreline drawn twice — a dark casing underneath,
+   *  then the pale centre line on top — so streets read at a glance against
+   *  the lots. Same centreline math as before (westEdge + i * (block+road)). */
   function drawRoads(ctx) {
-    ctx.strokeStyle = 'rgba(150,210,235,0.75)';
-    ctx.lineWidth = 3;
     const step = WORLD.block + WORLD.road;
-    for (let i = 0; i <= WORLD.blocks; i += 1) {
-      const x = -WORLD_W / 2 + i * step;
-      const p1 = toPx(x, 0);
-      const p2 = toPx(x, WORLD_W);
+    for (const pass of [
+      { style: 'rgba(18,24,40,0.9)', width: 7 },
+      { style: 'rgba(150,210,235,0.75)', width: 3 },
+    ]) {
+      ctx.strokeStyle = pass.style;
+      ctx.lineWidth = pass.width;
+      for (let i = 0; i <= WORLD.blocks; i += 1) {
+        const x = -WORLD_W / 2 + i * step;
+        const px = toPx(x, 0).px;
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, MAP);
+        ctx.stroke();
+        const z = -WORLD_W / 2 + i * step;
+        const py = toPx(0, z).py;
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(MAP, py);
+        ctx.stroke();
+      }
+    }
+  }
+
+  /** Trace the organic coastline: a rounded rectangle inset from the canvas
+   *  edge, with a cove bowing inland on the west beach side and an inlet on
+   *  the south. Reused for the sand fill, the surf stroke and the lot clip. */
+  function traceLand(ctx) {
+    const L = 18;
+    const T = 18;
+    const R = MAP - 18;
+    const B = MAP - 18;
+    const r = 48;
+    ctx.beginPath();
+    ctx.moveTo(L + r, T);
+    ctx.lineTo(R - r, T);
+    ctx.quadraticCurveTo(R, T, R, T + r);
+    ctx.lineTo(R, B - r);
+    ctx.quadraticCurveTo(R, B, R - r, B);
+    // South inlet between the Old Quarter and the Marina.
+    ctx.lineTo(580, B);
+    ctx.quadraticCurveTo(505, B - 116, 430, B);
+    ctx.lineTo(L + r, B);
+    ctx.quadraticCurveTo(L, B, L, B - r);
+    // West cove on the Coral Beach side.
+    ctx.lineTo(L, 420);
+    ctx.quadraticCurveTo(L + 92, 335, L, 250);
+    ctx.lineTo(L, T + r);
+    ctx.quadraticCurveTo(L, T, L + r, T);
+    ctx.closePath();
+  }
+
+  /** Darken + desaturate a district palette colour into a building-lot tint
+   *  (55% colour, 45% dark slate) so the cased roads read on top. Pure maths,
+   *  no rng — the map never touches the shared seed chain. */
+  function lotTint(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = (shift, slate) => Math.round(((n >> shift) & 255) * 0.55 + slate * 0.45);
+    return `rgb(${ch(16, 38)},${ch(8, 42)},${ch(0, 56)})`;
+  }
+
+  /** A few thin, low-alpha swell arcs offshore in the sea margin. */
+  function drawWaves(ctx) {
+    ctx.strokeStyle = 'rgba(150,225,235,0.16)';
+    ctx.lineWidth = 1;
+    const arcs = [
+      [12, 12, 18, 0, Math.PI / 2],
+      [MAP - 12, 12, 18, Math.PI / 2, Math.PI],
+      [12, MAP - 12, 18, -Math.PI / 2, 0],
+      [MAP - 12, MAP - 12, 18, Math.PI, Math.PI * 1.5],
+      [MAP / 2, 6, 14, 0.3, Math.PI - 0.3],
+      [6, MAP / 2, 14, Math.PI * 0.65, Math.PI * 1.35],
+      [MAP - 6, MAP / 2, 14, -Math.PI * 0.35, Math.PI * 0.35],
+      [MAP / 2, MAP - 6, 14, Math.PI + 0.3, Math.PI * 2 - 0.3],
+    ];
+    for (const [x, y, r, a0, a1] of arcs) {
       ctx.beginPath();
-      ctx.moveTo(p1.px, 0);
-      ctx.lineTo(p1.px, MAP);
-      ctx.stroke();
-      const z = -WORLD_W / 2 + i * step;
-      const q1 = toPx(0, z);
-      const q2 = toPx(WORLD_W, z);
-      ctx.beginPath();
-      ctx.moveTo(0, q1.py);
-      ctx.lineTo(MAP, q1.py);
+      ctx.arc(x, y, r, a0, a1);
       ctx.stroke();
     }
-    // Island frame.
-    ctx.strokeStyle = '#2ae0c0';
-    ctx.strokeRect(0.5, 0.5, MAP - 1, MAP - 1);
+  }
+
+  /** Two bridges on top of the water, both tied into the road grid: a
+   *  causeway across the south inlet mouth where the x=81 / x=155 avenues
+   *  meet it, and a Marina pier extending the z=229 street east over the
+   *  sea with a T-head and a moored boat. */
+  function drawBridges(ctx) {
+    const roadPx = WORLD.road * (MAP / WORLD_W);
+    const deck = (a, b, casing, fill, width) => {
+      ctx.strokeStyle = casing;
+      ctx.lineWidth = width + 4;
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      ctx.strokeStyle = fill;
+      ctx.lineWidth = width;
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+    };
+    // South causeway: road-width deck with a dashed centre line.
+    const c0 = toPx(55, 249);
+    const c1 = toPx(178, 249);
+    deck(c0, c1, 'rgba(18,24,40,0.9)', '#4a5058', roadPx);
+    ctx.strokeStyle = 'rgba(150,210,235,0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 5]);
+    ctx.beginPath(); ctx.moveTo(c0.px, c0.py); ctx.lineTo(c1.px, c1.py); ctx.stroke();
+    ctx.setLineDash([]);
+    // Marina pier: narrower timber deck from the (229,229) intersection.
+    const m0 = toPx(229, 229);
+    const m1 = toPx(284, 229);
+    deck(m0, m1, 'rgba(18,24,40,0.9)', '#8a7a5c', 6);
+    ctx.strokeStyle = '#8a7a5c';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(m1.px, m1.py - 9); ctx.lineTo(m1.px, m1.py + 9); ctx.stroke();
+    ctx.fillStyle = '#e8f4ff';
+    ctx.beginPath(); ctx.arc(m1.px - 8, m1.py + 12, 2.2, 0, Math.PI * 2); ctx.fill();
   }
 
   /** The Marina ferris wheel: a small ring with spokes near its world spot. */
@@ -152,14 +284,41 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
     ctx.stroke();
   }
 
-  /** Draw the live markers over the island: shells, mission target, police. */
+  /** Draw the live markers over the island: shells, job givers, mission
+   *  target, police. */
   function drawBlips(ctx) {
-    // Conch shells the player has NOT yet found: amber dots.
-    const found = state.shells || 0;
-    let shown = 0;
-    for (const s of SHELLS) {
-      if (shown >= found) blip(ctx, s.x, s.z, '#ffd9a0', 3.4);
-      else shown += 1;
+    // Conch shells the player has NOT yet taken: amber dots at the real
+    // catalog spots. The live handles carry the taken flags (placeShells()
+    // order === SHELLS order), so exactly the untaken shells are drawn —
+    // never the first-N of the catalog, which goes wrong the moment
+    // collection is non-sequential.
+    const shellHandles = getShells();
+    for (let i = 0; i < SHELLS.length; i += 1) {
+      if (shellHandles[i] && shellHandles[i].taken) continue;
+      blip(ctx, SHELLS[i].x, SHELLS[i].z, '#ffd9a0', 3.4);
+    }
+    // Job-giver markers: gold diamond + name for the story mission, teal
+    // dots + names for taxi / taco / race — the same colours as the 3D
+    // signs and the minimap blips, so the legend below stays true.
+    for (const mk of markers()) {
+      const p = toPx(mk.pos.x, mk.pos.z);
+      const colour = mk.kind === 'mission' ? '#ffc24a' : '#2ae0c0';
+      if (mk.kind === 'mission') {
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.moveTo(p.px, p.py - 7);
+        ctx.lineTo(p.px + 6, p.py);
+        ctx.lineTo(p.px, p.py + 7);
+        ctx.lineTo(p.px - 6, p.py);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        blip(ctx, mk.pos.x, mk.pos.z, colour, 4);
+      }
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = colour;
+      ctx.fillText(mk.label, p.px, p.py + 16);
     }
     // Mission / side-job target: a yellow diamond.
     const target = state.missionTarget || state.sideJobTarget;
@@ -226,13 +385,12 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null)
       </div>
       <div class="mp-sec">LEGEND</div>
       <div class="mp-legend">
-        ${legendItem('#2ae0c0', 'Story mission')}
-        ${legendItem('#4a7aff', 'Garage / safehouse')}
-        ${legendItem('#ffd9a0', 'Taxi / taco / race')}
+        ${legendItem('#ffc24a', 'Story mission')}
+        ${legendItem('#2ae0c0', 'Taxi \u00b7 taco \u00b7 race')}
         ${legendItem('#ffd900', 'Objective')}
-        ${legendItem('#ffb37a', 'Conch shell')}
-        ${legendItem('#ff4a4a', 'Police / heli')}
-        ${legendItem('#7dffb0', 'Hospital / respray')}
+        ${legendItem('#ffd9a0', 'Conch shell')}
+        ${legendItem('#4a7aff', 'Police car')}
+        ${legendItem('#ff4a4a', 'Police heli')}
       </div>
     `;
   }
