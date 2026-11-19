@@ -15,6 +15,8 @@ import { createOnFoot, followCamera } from './player/onfoot.js';
 import { createArsenal } from './combat/weapons.js';
 import { createEnemies } from './combat/enemies.js';
 import { createCombat } from './combat/combat.js';
+import { createWanted } from './police/wanted.js';
+import { createPolice } from './police/units.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -42,6 +44,11 @@ function boot() {
   const enemies = createEnemies(scene, city, rng);
   const crosshairEl = document.getElementById('crosshair');
 
+  // Wanted system + the police units that hunt Rook. The controller keeps the
+  // stars/heat on state; the units drive the road grid and heli at Rook.
+  const wanted = createWanted(state);
+  const police = createPolice(scene, city, rng, wanted);
+
   // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
   const bayRunner = CARS.find((c) => c.name === 'Bay Runner') || CARS[1];
   let parked = null;
@@ -61,6 +68,7 @@ function boot() {
   const combat = createCombat(scene, state, arsenal, enemies, onFoot, {
     traffic,
     crosshair: crosshairEl,
+    wanted,
     onDown: onWasted,
     onHurt: (dmg) => { state.pushPopup(`HIT −${Math.round(dmg)}`); },
   });
@@ -72,15 +80,33 @@ function boot() {
     const wasted = document.getElementById('wasted-screen');
     if (wasted) wasted.style.display = 'grid';
   }
+  // Busted screen: a cop grabs Rook while wanted; the fine is steeper and the
+  // mission (if one is running) fails.
+  function onBusted() {
+    state.bustedCount += 1;
+    downTimer = 2.0;
+    const fine = Math.min(800, state.money);
+    state.money = Math.max(0, state.money - fine);
+    state.pushPopup(`BUSTED −$${fine}`);
+    if (state.missionId !== null) {
+      state.missionId = null;
+      state.pushPopup('MISSION FAILED');
+    }
+    const busted = document.getElementById('busted-screen');
+    if (busted) busted.style.display = 'grid';
+  }
   function respawn() {
     state.down = false;
     state.health = PLAYER.health;
     state.armour = PLAYER.armour;
-    state.money = Math.max(0, state.money - 500);
+    state.money = Math.max(0, state.money);
     state.stars = 0;
+    state.heat = 0;
     state.inCar = false;
     const wasted = document.getElementById('wasted-screen');
     if (wasted) wasted.style.display = 'none';
+    const busted = document.getElementById('busted-screen');
+    if (busted) busted.style.display = 'none';
     // Teleport back to the Coral Beach boulevard, away from the trouble.
     onFoot.setPosition(new THREE.Vector3(spawn.x - 5, 0, spawn.z + 6), 0);
     onFoot.show();
@@ -147,7 +173,7 @@ function boot() {
       if (pp.distanceTo(tc.pos) < reach) {
         state.carsStolen += 1;
         if (tc.driver) {
-          state.addStars(1);
+          wanted.addHeat(22, 'steal');
           state.pushPopup('CAR STOLEN');
         }
         tc.visible = false;
@@ -204,6 +230,20 @@ function boot() {
 
     // Combat runs every step: ammo/reload, flashes, enemy AI and any hits.
     combat.update(dt, input, camera);
+
+    // Police: units drive at Rook, ram his car and — on foot, up close — bust
+    // him. Rook's position and speed feed the chase; the result can shove the
+    // player's car or end the run.
+    if (!state.down) {
+      const ppos = state.inCar ? driver.car.position : onFoot.getPosition();
+      const pspd = state.inCar ? driver.speedKmh() : 0;
+      const res = police.update(dt, ppos, null, wanted.stars, state.inCar, pspd);
+      if (res.bust) onBusted();
+      if (res.ram && state.inCar && driver.car) {
+        driver.car.position.x += res.ram.x * dt * 30;
+        driver.car.position.z += res.ram.z * dt * 30;
+      }
+    }
   }
 
   // Expose a mission hook: spawn a named enemy kind at a world point. Extra

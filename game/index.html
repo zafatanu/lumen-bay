@@ -47,6 +47,15 @@
   #wasted-screen h2 { margin: 0; font-size: 3.5em; letter-spacing: 0.15em; color: #ff5a5a;
     text-shadow: 0 3px 10px rgba(0,0,0,0.8); }
   #wasted-screen p { margin: 0; font-size: 1.05em; opacity: 0.95; }
+  /* Busted screen: a cop grabs Rook while wanted; a heavier fine applies. */
+  #busted-screen {
+    position: absolute; inset: 0; place-content: center;
+    text-align: center; gap: 0.5em; pointer-events: none; display: none;
+    background: radial-gradient(ellipse at center, rgba(20,30,120,0.4), rgba(0,5,40,0.85));
+  }
+  #busted-screen h2 { margin: 0; font-size: 3.5em; letter-spacing: 0.15em; color: #5a9aff;
+    text-shadow: 0 3px 10px rgba(0,0,0,0.8); }
+  #busted-screen p { margin: 0; font-size: 1.05em; opacity: 0.95; }
 </style>
 </head>
 <body>
@@ -66,6 +75,10 @@
   <div id="wasted-screen" class="fullscreen">
     <h2>WASTED</h2>
     <p>Rook is down. Respawned at the hospital for $500, wanted cleared.</p>
+  </div>
+  <div id="busted-screen" class="fullscreen">
+    <h2>BUSTED</h2>
+    <p>Captain Solano has you. Pay the fine and wanted cleared.</p>
   </div>
   <div id="controls-footer" class="fullscreen"></div>
   <div id="popups" class="fullscreen"></div>

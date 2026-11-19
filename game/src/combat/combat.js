@@ -165,6 +165,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
   const onKill = opts.onKill || null;
   const onDown = opts.onDown || null;
   const onHurt = opts.onHurt || null;
+  const wanted = opts.wanted || null;
 
   // Flashes and tracer bolts live in their own group: one tidy parent, and a
   // marker so a raycast can skip them without ever walking it.
@@ -334,6 +335,8 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     dir.normalize();
     if (shot.muzzle) flashes.muzzle(muzzle, 1.2 + shot.knock * 2);
     aimPitch += (Math.random() - 0.5) * 0.006;
+    // Firing a weapon is itself a crime the wanted meter tracks.
+    if (wanted) wanted.addHeat(2, 'shoot');
 
     const targets = [];
     for (const e of enemies.list) {
@@ -357,7 +360,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
         addTracer(muzzle, pt.clone());
         if (onKill) onKill(owner.enemy, h.distance);
       } else if (owner && owner.ped) {
-        state.addStars(1);
+        if (wanted) wanted.addHeat(14, 'pedestrian');
         flashes.impact(pt);
         addTracer(muzzle, pt.clone());
       } else {

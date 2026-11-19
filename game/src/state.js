@@ -13,6 +13,10 @@ export function createState() {
     health: 100,
     armour: 0,
     stars: 0,
+    heat: 0,
+    bustedCount: 0,
+    lastSeenPos: null,
+    policeFeed: [],
     missionId: null,
     missionStage: 0,
     completedMissions: [],
@@ -51,7 +55,7 @@ export function createState() {
       // Coerce saved fields back to numbers: an old or hand-edited save must
       // not poison the sim with string arithmetic.
       const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
-        'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
+        'heat', 'bustedCount', 'carsStolen', 'escapes', 'takedowns', 'wastedCount', 'collectibles', 'playSeconds', 'driftScore', 'nearMissCount', 'speedKmh'];
       for (const k of numeric) {
         const v = Number(state[k]);
         if (Number.isFinite(v)) state[k] = v;
