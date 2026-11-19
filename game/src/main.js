@@ -385,6 +385,7 @@ function boot() {
   function setScreen(next) {
     screen = next;
     hideSub();
+    if (next !== 'menu') { menuClose && menuClose(); menuClose = null; }
     if (next === 'menu') { menuClose && menuClose(); titleEl.style.display = 'none'; menuRefresh(); }
     else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); titleEl.style.display = 'none'; }
     else if (next === 'paused') { pause.open(); map.close(); }
