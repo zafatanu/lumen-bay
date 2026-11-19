@@ -132,7 +132,7 @@ function stageShootout(ctx) {
   // Rook on foot on a Dockside road, braced for a fight.
   const px = 229;
   const pz = -67;
-  onFoot.setPosition({ x: px, y: 0, z: pz }, 0);
+  onFoot.setPosition({ x: px, y: 0, z: pz }, -Math.PI / 2);
   onFoot.show();
   state.inCar = false;
 
