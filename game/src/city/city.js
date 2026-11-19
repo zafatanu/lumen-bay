@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { WORLD, COAST, SEA, DISTRICTS, SPAWN, SUNSET } from '../config.js';
 import { makeFacadeTexture, registerAmbient } from '../render/scene.js';
 import { rand, randInt, pick } from '../random.js';
+import { snapToRoad } from '../missions/catalog.js';
 
 // Ambient dressing lists: filled during the build, ticked by one updater
 // registered with the render loop. Visual only — nothing here feeds gameplay,
@@ -54,6 +55,37 @@ function shade(hex, f) {
   const b = Math.round((n & 255) * f);
   return (r << 16) | (g << 8) | b;
 }
+
+/** Deterministic 0..1 choice hashed from a world position + salt. Dressing
+ *  only: same convention as the ambient phases above — no rng draws are
+ *  spent, so the seeded city layout (and the traffic/enemy/police draws
+ *  that follow it on the shared stream) stays byte-identical. */
+function posRand(x, z, salt) {
+  let h = (Math.round(x * 374761393) + Math.round(z * 668265263) + Math.imul(salt + 1, 2246822519)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+/** A private rng-like stream hashed from a position, for helpers (makePalm)
+ *  that expect an rng function. Spends nothing on the shared seed chain. */
+function posRng(x, z) {
+  let salt = 0;
+  return () => posRand(x, z, salt++);
+}
+
+// Shared dressing materials: the boardwalk, boulevard palms and courtyard
+// clusters all reuse one instance per finish so GPU programs stay shared.
+const PALM_TRUNK = mat(0x7a5230);
+const PALM_FROND = mat(0x3f7a3f);
+const POT_MAT = mat(0xb87a5a);
+const SHRUB_MAT = mat(0x4f7a4a);
+const BENCH_MAT = mat(0x6b4a2f);
+
+// Solid footprints ({x,z,w,d}) collected during the build: every ring
+// building plus the Dockside warehouse/container yard. buildProps slides
+// sidewalk props clear of these so nothing ends up inside a solid.
+let propSolids = [];
 
 // Painted shop signs (no neon): a small shared set of canvas textures, built
 // once and reused across the showcase streets. LUMEN BAY's own words only.
@@ -235,14 +267,12 @@ function buildBoardwalk(group, rng) {
   }
 
   // Planters on the inland edge: terracotta box + a clipped shrub.
-  const potMat = mat(0xb87a5a);
-  const shrubMat = mat(0x4f7a4a);
   for (let z = -len / 2 + 14; z < len / 2 - 10; z += rand(rng, 24, 34)) {
-    const pot = new THREE.Mesh(GEO.box, potMat);
+    const pot = new THREE.Mesh(GEO.box, POT_MAT);
     pot.scale.set(1.4, 0.7, 1.4);
     pot.position.set(westEdge() + COAST.boardwalkWidth + 0.9, 0.35, z);
     group.add(pot);
-    const shrub = new THREE.Mesh(GEO.sphere, shrubMat);
+    const shrub = new THREE.Mesh(GEO.sphere, SHRUB_MAT);
     shrub.scale.set(1.3, 0.9, 1.3);
     shrub.position.set(pot.position.x, 1.0, z);
     group.add(shrub);
@@ -277,8 +307,8 @@ function makePalm(rng, trunkMat, frondMat, h) {
 /** Palms in UNEVEN clusters: a boulevard row with random gaps and doubled-up
  *  trunks, plus a sparser beach row out on the sand. No metronome spacing. */
 function buildPalms(group, rng) {
-  const trunkMat = mat(0x7a5230);
-  const frondMat = mat(0x3f7a3f);
+  const trunkMat = PALM_TRUNK;
+  const frondMat = PALM_FROND;
 
   // Boulevard row: clusters of 1-3 with irregular gaps.
   let z = -WORLD.total / 2 + 10;
@@ -312,8 +342,10 @@ function buildPalms(group, rng) {
  *  (nx, nz) is the outward street-facing normal, so awnings, balconies and
  *  signs land on the face the street sees. Deco districts get silhouette
  *  dressing: corner fins, a stepped setback crown, a canopy skirt, balconies,
- *  a painted sign and extra roof equipment. */
-function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1) {
+ *  a painted sign and extra roof equipment. Other districts get a cheap
+ *  subset of the same kit (parapet, sign, awning, Downtown setbacks).
+ *  If `out` is an array, the building's footprint record is pushed to it. */
+function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1, out = null) {
   const deco = district.deco === true;
   const floors = Math.max(2, Math.round(district.maxH / 3));
   const tex = makeFacadeTexture(district.palette, floors, rng, deco);
@@ -342,7 +374,75 @@ function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1) {
     group.add(ac);
   }
 
-  if (!deco) return mesh;
+  if (out) out.push({ x, z, w, d, h, nx, nz });
+
+  if (!deco) {
+    // Cheap subset of the deco kit for the working districts, all on the
+    // existing unit-box + facade pipeline. Choices hash off the building's
+    // position (posRand) so no rng draws are spent and the seeded layout
+    // stays byte-identical. Footprint, height and collider are untouched.
+    const trimMat = mat(shade(roof, 0.72));
+
+    // Parapet step: a slightly smaller flat box on the roof slab, so the
+    // roofline reads as a stepped edge instead of one flat slab.
+    const parapet = new THREE.Mesh(GEO.box, mat(shade(roof, 0.82)));
+    parapet.scale.set(w * 0.94, 0.55, d * 0.94);
+    parapet.position.set(x, h + 1.075, z);
+    group.add(parapet);
+
+    // Tall Downtown towers step back once (twice when very tall) so the
+    // skyline rises in tiers instead of one slab.
+    if (district.name === 'Downtown' && h > 40) {
+      const s1 = 0.52 + posRand(x, z, 1) * 0.16;
+      const ch1 = 3.5 + posRand(x, z, 2) * 4;
+      const tier1 = new THREE.Mesh(GEO.box, trimMat);
+      tier1.scale.set(w * s1, ch1, d * s1);
+      tier1.position.set(
+        x + (posRand(x, z, 3) - 0.5) * w * 0.16,
+        h + 0.8 + ch1 / 2,
+        z + (posRand(x, z, 4) - 0.5) * d * 0.16,
+      );
+      group.add(tier1);
+      if (h > 52) {
+        const ch2 = 2.5 + posRand(x, z, 5) * 2.5;
+        const tier2 = new THREE.Mesh(GEO.box, mat(shade(roof, 0.6)));
+        tier2.scale.set(w * s1 * 0.62, ch2, d * s1 * 0.62);
+        tier2.position.set(tier1.position.x, h + 0.8 + ch1 + ch2 / 2, tier1.position.z);
+        group.add(tier2);
+      }
+    }
+
+    // Canopy awning over the ground-floor shopfront on the street face.
+    if (posRand(x, z, 6) < 0.8) {
+      const awn = new THREE.Mesh(GEO.box, mat(shade(roof, 0.6)));
+      if (nz !== 0) {
+        awn.scale.set(w * 0.72, 0.18, 1.9);
+        awn.position.set(x, 3.4, z + nz * (d / 2 + 0.85));
+        awn.rotation.x = nz * 0.1;
+      } else {
+        awn.scale.set(1.9, 0.18, d * 0.72);
+        awn.position.set(x + nx * (w / 2 + 0.85), 3.4, z);
+        awn.rotation.z = -nx * 0.1;
+      }
+      group.add(awn);
+    }
+
+    // One painted sign board per building on the outward (street) face —
+    // same warm-paint kit as the deco districts, never neon.
+    const faceLen = nz !== 0 ? w : d;
+    const sw = Math.min(4.5 + posRand(x, z, 7) * 3, faceLen - 2);
+    const sign = signBoard(SIGN_WORDS[Math.floor(posRand(x, z, 8) * SIGN_WORDS.length)], sw);
+    const so = (posRand(x, z, 9) - 0.5) * (faceLen - sw) * 0.5;
+    const sy = 5.6 + posRand(x, z, 10) * 1.6;
+    if (nz !== 0) {
+      sign.position.set(x + so, sy, z + nz * (d / 2 + 0.18));
+    } else {
+      sign.rotation.y = Math.PI / 2;
+      sign.position.set(x + nx * (w / 2 + 0.18), sy, z + so);
+    }
+    group.add(sign);
+    return mesh;
+  }
 
   const trimMat = mat(shade(roof, 0.72));
   const darkMat = mat(shade(roof, 0.55));
@@ -448,10 +548,13 @@ function buildBuilding(group, district, rng, x, z, w, d, nx = 0, nz = 1) {
   return mesh;
 }
 
-/** Build a full city block: a ring of buildings around a leafy court. */
+/** Build a full city block: a ring of buildings around a leafy court.
+ *  Returns the block's building records ({x,z,w,d,h,nx,nz}) so buildNeon
+ *  can anchor signs to real facades; footprints also feed propSolids. */
 function buildBlock(group, district, rng, bx, bz) {
   const lot = WORLD.block;
   const inset = 2;
+  const recs = [];
   const faces = [
     { x: 0, z: lot * 0.28, w: lot - inset * 2, d: lot * 0.26, nx: 0, nz: 1 },
     { x: 0, z: -lot * 0.28, w: lot - inset * 2, d: lot * 0.26, nx: 0, nz: -1 },
@@ -471,19 +574,82 @@ function buildBlock(group, district, rng, bx, bz) {
       const pz = horizontal ? 0 : off;
       const pw = horizontal ? piece : f.w;
       const pd = horizontal ? f.d : piece;
-      buildBuilding(group, district, rng, bx + f.x + px, bz + f.z + pz, pw, pd, f.nx, f.nz);
+      buildBuilding(group, district, rng, bx + f.x + px, bz + f.z + pz, pw, pd, f.nx, f.nz, recs);
     }
   }
+  for (const r of recs) propSolids.push(r);
+  // Dress the courtyard — except Dockside, whose court is already filled
+  // by the warehouse and container yard (a cluster there would sit inside
+  // the solids).
+  if (district.name !== 'Dockside') dressCourtyard(group, bx, bz);
+  return recs;
 }
 
-/** Downtown neon signs: emissive boxes hung on the lower facades. */
-function buildNeon(group, rng, bx, bz) {
+/** One leafy cluster per courtyard: a palm, two planters and a bench, all
+ *  from the existing boardwalk/palm kit (makePalm + pot/shrub + bench box).
+ *  The building ring's inner faces sit ~9m from the block centre, so the
+ *  cluster stays inside ~5.5m — clear of the ring and of the roads. The
+ *  palm's lean/fronds come from a position-hashed stream (posRng), so no
+ *  draws are spent on the shared seed chain. */
+function dressCourtyard(group, bx, bz) {
+  const crng = posRng(bx, bz);
+  const palm = makePalm(crng, PALM_TRUNK, PALM_FROND, 3.6 + crng() * 1.6);
+  palm.position.set(bx + (crng() - 0.5) * 4, 0, bz + (crng() - 0.5) * 4);
+  group.add(palm);
+  queuePalmSway(palm);
+  for (const [ox, oz] of [[-3.2, 2.6], [3.1, -2.5]]) {
+    const pot = new THREE.Mesh(GEO.box, POT_MAT);
+    pot.scale.set(1.4, 0.7, 1.4);
+    pot.position.set(bx + ox, 0.35, bz + oz);
+    group.add(pot);
+    const shrub = new THREE.Mesh(GEO.sphere, SHRUB_MAT);
+    shrub.scale.set(1.3, 0.9, 1.3);
+    shrub.position.set(bx + ox, 1.0, bz + oz);
+    group.add(shrub);
+  }
+  const bench = new THREE.Mesh(GEO.box, BENCH_MAT);
+  bench.scale.set(1.8, 0.5, 0.7);
+  bench.position.set(bx + (crng() - 0.5) * 2, 0.25, bz + 4.3);
+  bench.rotation.y = (crng() - 0.5) * 0.5;
+  group.add(bench);
+}
+
+/** Downtown neon signs: emissive boxes anchored ON the lower street-facing
+ *  facades of the block's buildings — slightly proud of the wall, never
+ *  floating mid-courtyard. The original rng draws are kept in the same
+ *  order; the drawn x/z now select which building and where along its
+ *  street face instead of a free-floating point inside the block. */
+function buildNeon(group, rng, bx, bz, recs) {
   const colours = [0xff3b6b, 0x3bf2ff, 0xffd23b, 0x8bff5a, 0xff8b3b];
   const count = 4 + randInt(rng, 0, 4);
   for (let i = 0; i < count; i += 1) {
     const sign = new THREE.Mesh(GEO.box, new THREE.MeshBasicMaterial({ color: pick(rng, colours) }));
-    sign.scale.set(6 + rand(rng, 0, 8), 2 + rand(rng, 0, 2), 0.4);
-    sign.position.set(bx + rand(rng, -18, 18), 10 + rand(rng, 0, 12), bz + rand(rng, -18, 18));
+    const sw = 6 + rand(rng, 0, 8);
+    const sh = 2 + rand(rng, 0, 2);
+    const rx = rand(rng, -18, 18);
+    const sy = 10 + rand(rng, 0, 12);
+    const rz = rand(rng, -18, 18);
+    sign.scale.set(sw, sh, 0.4);
+    const b = recs && recs.length
+      ? recs[Math.min(recs.length - 1, Math.floor(((rx + 18) / 36) * recs.length))]
+      : null;
+    if (!b) {
+      // No facade records (shouldn't happen): keep the legacy placement.
+      sign.position.set(bx + rx, sy, bz + rz);
+      group.add(sign);
+      continue;
+    }
+    // Face-centre math from the building's outward normal: sit the sign
+    // 0.25m proud of the wall, centred along the face within its width.
+    const faceLen = b.nz !== 0 ? b.w : b.d;
+    const off = ((rz + 18) / 36 - 0.5) * Math.max(0, faceLen - sw - 1);
+    const y = Math.min(sy, b.h - sh / 2 - 1);
+    if (b.nz !== 0) {
+      sign.position.set(b.x + off, y, b.z + b.nz * (b.d / 2 + 0.25));
+    } else {
+      sign.rotation.y = Math.PI / 2;
+      sign.position.set(b.x + b.nx * (b.w / 2 + 0.25), y, b.z + off);
+    }
     group.add(sign);
   }
 }
@@ -500,6 +666,7 @@ function buildDocks(group, district, rng, bx, bz) {
   wh.castShadow = true;
   wh.receiveShadow = true;
   group.add(wh);
+  propSolids.push({ x: bx + 8, z: bz - 6, w: 46, d: 26 }); // warehouse footprint
 
   // Container colours.
   const cCols = [0xd2473b, 0x2f7fd2, 0x3c8f4f, 0xe0b23b, 0x7a7f88];
@@ -511,6 +678,7 @@ function buildDocks(group, district, rng, bx, bz) {
     c.castShadow = true;
     group.add(c);
   }
+  propSolids.push({ x: bx + 1, z: bz + 18, w: 52, d: 24 }); // container yard footprint
 
   // Two crane towers at the water's edge (west) of the docks.
   for (let k = 0; k < 2; k += 1) {
@@ -607,6 +775,51 @@ function buildFerrisWheel(rng, bx, bz) {
   return wheel;
 }
 
+/** Nearest road-grid line to a coordinate (read-only mirror of the grid
+ *  math in catalog.js — the grid itself is never modified). */
+function nearestRoadLine(v) {
+  const step = WORLD.block + WORLD.road;
+  const i = Math.max(0, Math.min(WORLD.blocks, Math.round((v - westEdge()) / step)));
+  return westEdge() + i * step;
+}
+
+/** Snap a seeded point onto the road grid with the catalog's snapToRoad,
+ *  then push it out past the kerb onto the sidewalk strip (kerb at 7m from
+ *  the road centre, building faces at ~12.4m, so 9m sits on the walk). If a
+ *  solid footprint (Dockside warehouse/yard can reach the kerb) covers the
+ *  spot, slide along the road until clear. Deterministic — the caller's
+ *  rng draws are untouched; this only repositions their result. */
+function sidewalkSpot(x, z) {
+  const p = snapToRoad(x, z);
+  const kerb = WORLD.road / 2;
+  const walk = kerb + 2;
+  const lx = nearestRoadLine(p.x);
+  const lz = nearestRoadLine(p.z);
+  const onX = Math.abs(p.x - lx) <= kerb; // x on a N-S road → slide along z
+  const onZ = Math.abs(p.z - lz) <= kerb;
+  if (onX) p.x = lx + (p.x < lx ? -walk : walk);
+  if (onZ) p.z = lz + (p.z < lz ? -walk : walk);
+  const r = 1.1; // prop half-extent margin
+  const hit = (px, pz) => propSolids.some((s) =>
+    Math.abs(px - s.x) < s.w / 2 + r && Math.abs(pz - s.z) < s.d / 2 + r);
+  if (hit(p.x, p.z)) {
+    const base = onX ? p.z : p.x;
+    const limit = WORLD.total / 2 - 2;
+    // Fine 4m steps: adjacent Dockside yards can tile the walk, leaving
+    // only narrow gaps between them (and between the cross-road guards).
+    for (const step of [4, -4, 8, -8, 12, -12, 16, -16, 20, -20, 24, -24, 28, -28, 32, -32, 36, -36]) {
+      const v = base + step;
+      if (Math.abs(v) > limit) continue;
+      // Never slide into a cross-road's drive lanes at an intersection.
+      if (Math.abs(v - nearestRoadLine(v)) <= kerb + 0.5) continue;
+      const px = onX ? p.x : v;
+      const pz = onX ? v : p.z;
+      if (!hit(px, pz)) { p.x = px; p.z = pz; break; }
+    }
+  }
+  return p;
+}
+
 /** Small street furniture: lamps, hydrants, benches, traffic lights. */
 function buildProps(group, rng) {
   const lampCol = 0x3a3f46;
@@ -628,20 +841,23 @@ function buildProps(group, rng) {
     queueLamp(head.material, 0.6, lamp.position.x, z);
   }
 
-  // Fire hydrants, benches and traffic lights at random points.
+  // Fire hydrants, benches and traffic lights: the same 26 seeded points as
+  // before (draws kept in order), snapped onto the road grid and nudged out
+  // to the sidewalk strip — never inside a building block or a courtyard.
   for (let i = 0; i < 26; i += 1) {
     const kind = rng();
     const x = rand(rng, -WORLD.total / 2, WORLD.total / 2);
     const z = rand(rng, -WORLD.total / 2, WORLD.total / 2);
+    const p = sidewalkSpot(x, z);
     if (kind < 0.4) {
       const h = new THREE.Mesh(GEO.cylinder, mat(0xd2473b));
       h.scale.set(0.18, 0.6, 0.18);
-      h.position.set(x, 0.3, z);
+      h.position.set(p.x, 0.3, p.z);
       group.add(h);
     } else if (kind < 0.7) {
-      const b = new THREE.Mesh(GEO.box, mat(0x6b4a2f));
+      const b = new THREE.Mesh(GEO.box, BENCH_MAT);
       b.scale.set(1.8, 0.5, 0.7);
-      b.position.set(x, 0.25, z);
+      b.position.set(p.x, 0.25, p.z);
       group.add(b);
     } else {
       const t = new THREE.Group();
@@ -653,9 +869,9 @@ function buildProps(group, rng) {
       bulb.scale.set(0.5, 0.5, 0.5);
       bulb.position.set(0, 4.2, 0);
       t.add(bulb);
-      t.position.set(x, 0, z);
+      t.position.set(p.x, 0, p.z);
       group.add(t);
-      queueLamp(bulb.material, 0.6, x, z);
+      queueLamp(bulb.material, 0.6, p.x, p.z);
     }
   }
 }
@@ -756,6 +972,7 @@ export function createCity(scene, rng) {
   lampGlows = [];
   facadeTex = [];
   cruiserBar = null;
+  propSolids = [];
 
   buildGround(group);
   buildWater(group);
@@ -787,8 +1004,8 @@ export function createCity(scene, rng) {
   for (const entry of districts.values()) {
     const d = entry.district;
     for (const b of entry.blocks) {
-      buildBlock(group, d, rng, b.cx, b.cz);
-      if (d.name === 'Downtown') buildNeon(group, rng, b.cx, b.cz);
+      const recs = buildBlock(group, d, rng, b.cx, b.cz);
+      if (d.name === 'Downtown') buildNeon(group, rng, b.cx, b.cz, recs);
       if (d.name === 'Dockside') buildDocks(group, d, rng, b.cx, b.cz);
     }
   }
