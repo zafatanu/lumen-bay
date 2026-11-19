@@ -21,6 +21,8 @@ import { createMissions } from './missions/missions.js';
 import { createSideJobs } from './missions/sidejobs.js';
 import { districtPoint, MISSIONS as missionCatalog } from './missions/catalog.js';
 import { drawPortrait } from './missions/characters.js';
+import { createHud } from './hud/hud.js';
+import { createRadio } from './audio/radio.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -52,6 +54,25 @@ function boot() {
   // stars/heat on state; the units drive the road grid and heli at Rook.
   const wanted = createWanted(state);
   const police = createPolice(scene, city, rng, wanted);
+
+  // Dense HUD + WebAudio synth radio. `getPlayer` gives the HUD a single
+  // live source of the player's world position/heading whether driving or
+  // on foot; the radio object stays optional so the HUD falls back to the
+  // radioStation/radioTrack fields on state (kept current by the N key).
+  const hudEl = document.getElementById('hud');
+  const radio = createRadio();
+  const hud = createHud(state, hudEl, {
+    getPlayer: () => {
+      if (state.inCar && driver.car) {
+        return { x: driver.car.position.x, z: driver.car.position.z, heading: driver.heading, inCar: true };
+      }
+      const p = onFoot.getPosition();
+      return { x: p.x, z: p.z, heading: onFoot.heading, inCar: false };
+    },
+    arsenal,
+    radio,
+    police,
+  });
 
   // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
   const bayRunner = CARS.find((c) => c.name === 'Bay Runner') || CARS[1];
@@ -211,6 +232,19 @@ function boot() {
 
   // --- Screens: title shows until the player starts; Esc pauses; M maps. ---
   let screen = 'title';
+  let radioStarted = false;
+  let driftBank = 0;
+
+  /** Start the synth radio on the first real user gesture; browsers block the
+   *  AudioContext until a key/mouse event, so this must sit in the input path. */
+  function ensureRadio() {
+    if (radioStarted) return;
+    radioStarted = true;
+    radio.start();
+    const cur = radio.current();
+    state.radioStation = `${cur.station} \u00b7 ${cur.freq} MHz`;
+    state.radioTrack = cur.track;
+  }
   function show(next) { screen = next; }
 
   // --- Fixed-step 1/60 loop with an accumulated remainder. ---
@@ -219,14 +253,28 @@ function boot() {
 
   function handleScreens() {
     if (input.pressed('Enter') || input.pressed('Space')) {
+      ensureRadio();
       if (screen === 'title') show('play');
       else if (screen === 'paused') show('play');
     }
     if (input.pressed('Escape')) {
+      ensureRadio();
       show(screen === 'play' ? 'paused' : 'play');
     }
     if (input.pressed('KeyM')) {
+      ensureRadio();
       show(screen === 'map' ? 'play' : 'map');
+    }
+    // N cycles the radio station; any other key press is also a user gesture
+    // that can resume a suspended AudioContext, so start audio here too.
+    if (input.consumeAny(['KeyN'])) {
+      ensureRadio();
+      const cur = radio.next();
+      if (cur) {
+        state.radioStation = `${cur.station} \u00b7 ${cur.freq} MHz`;
+        state.radioTrack = cur.track;
+        state.pushPopup(`RADIO \u2014 ${cur.station}`);
+      }
     }
   }
 
@@ -243,8 +291,7 @@ function boot() {
     }
     // Scene render + HUD refresh happen once per display frame.
     update(STEP, state.clockMinutes);
-    const hudClock = document.getElementById('clock');
-    if (hudClock) hudClock.textContent = state.formatClock();
+    hud.update(STEP);
     // Drain popups so they disappear after their lifetime.
     if (state.popups.length) {
       state.popups = state.popups.filter((p) => { p.t -= STEP; return p.t > 0; });
@@ -316,7 +363,25 @@ function boot() {
       driver.update(dt, snap);
       driver.updateCamera(camera, dt);
       const tm = traffic.update(dt, driver.car.position, driver.speedKmh());
-      if (tm && tm.nearMiss) state.noteNearMiss();
+      if (tm && tm.nearMiss) {
+        state.noteNearMiss();
+        state.money += 250;
+        state.pushPopup('NEAR MISS +$250');
+      }
+      // Bank drift points while the driver is sliding; cash them out the moment
+      // the slide ends (driftScore decays to ~0), so a reward pops per drift.
+      if (driver.drifting()) {
+        driftBank += driver.driftScore * 0.6;
+      } else if (driftBank > 60) {
+        const x3 = Math.max(1, Math.round(driftBank / 100));
+        const cash = x3 * 50;
+        state.pushPopup(`DRIFT x${x3} +$${cash}`);
+        state.driftScore += cash;
+        state.money += cash;
+        driftBank = 0;
+      } else {
+        driftBank = 0;
+      }
       if (input.consumeAny(['KeyF'])) exitCar();
     } else {
       followCamera(camera, dt, onFoot.getPosition(), onFoot.heading);

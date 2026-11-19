@@ -48,6 +48,10 @@ export function createState() {
     nearMissCount: 0,
     speedKmh: 0,
     popups: [],
+    // S6: the HUD radio widget reads these; main.js refreshes them from the
+    // WebAudio synth radio whenever the station or track changes.
+    radioStation: 'WAVE 88.1',
+    radioTrack: 'Midnight Circuit',
   });
 
   const state = fresh();

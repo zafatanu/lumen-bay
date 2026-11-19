@@ -57,21 +57,71 @@
     text-shadow: 0 3px 10px rgba(0,0,0,0.8); }
   #busted-screen p { margin: 0; font-size: 1.05em; opacity: 0.95; }
 </style>
+<link rel="stylesheet" href="./src/hud/hud.css">
 </head>
 <body>
 <canvas id="world3d" width="1280" height="720" aria-label="Lumen Bay: drive a stolen car across a sunlit open-world island city"></canvas>
 <div id="hud">
-  <div id="mission-panel" class="fullscreen"></div>
-  <div id="police-list" class="fullscreen"></div>
-  <canvas id="minimap" class="fullscreen" width="192" height="192"></canvas>
-  <div id="wanted" class="fullscreen"></div>
-  <div id="money" class="fullscreen"></div>
-  <div id="clock" class="fullscreen"></div>
-  <div id="speedo" class="fullscreen"></div>
-  <div id="radio" class="fullscreen"></div>
-  <div id="dialogue" class="fullscreen"></div>
-  <div id="weapons" class="fullscreen"></div>
   <div id="crosshair" class="fullscreen"></div>
+
+  <div id="mission-panel" class="panel hud-tl">
+    <div class="mp-chapter" data-hud="mission-title">LUMEN BAY</div>
+    <div class="mp-obj" data-hud="mission-obj">Free roam — press E at a sign to start a job.</div>
+    <div class="mp-row">
+      <span data-hud="mission-timer"></span>
+      <span class="mp-stage" data-hud="mission-stage"></span>
+    </div>
+    <div class="mp-next" data-hud="mission-next"></div>
+  </div>
+
+  <div id="police-list" class="panel hud-ml" data-hud="police-list"></div>
+
+  <div class="panel hud-bl">
+    <canvas data-hud="minimap" width="192" height="192"></canvas>
+    <div class="bar health"><span class="fill" data-hud="health-fill"></span></div>
+    <div class="bar armour"><span class="fill" data-hud="armour-fill"></span></div>
+    <div class="rep-row">
+      <span data-hud="rep-tier">RANK 1</span>
+      <div class="bar rep"><span class="fill" data-hud="rep-fill"></span></div>
+    </div>
+  </div>
+
+  <div class="panel hud-tr">
+    <div data-hud="wanted-stars">☆☆☆☆☆</div>
+    <div class="tr-row">
+      <span data-hud="money">$0</span>
+      <span data-hud="clock">Day 1 · 17:40</span>
+    </div>
+  </div>
+
+  <div class="panel hud-br">
+    <div class="sp-num" data-hud="speedo-kmh">0<span class="sp-unit">KM/H</span></div>
+    <div class="sp-name" data-hud="car-name">ON FOOT</div>
+    <div class="bar cond"><span class="fill" data-hud="cond-fill"></span></div>
+    <div class="bar nitro"><span class="fill" data-hud="nitro-fill"></span></div>
+    <div class="bar fuel"><span class="fill" data-hud="fuel-fill"></span></div>
+    <div class="sp-foot" data-hud="on-foot" style="display:none"></div>
+  </div>
+
+  <div id="dialogue" class="panel hud-bc">
+    <img class="dlg-img" data-hud="dialogue-img" alt="">
+    <div class="dlg-body">
+      <div class="dlg-name" data-hud="dialogue-name"></div>
+      <div class="dlg-line" data-hud="dialogue-line"></div>
+    </div>
+  </div>
+
+  <div id="weapons" class="panel hud-w" data-hud="weapons"></div>
+
+  <div id="radio" class="panel hud-radio" data-hud="radio">
+    <div data-hud="radio-station">OFF AIR</div>
+    <div data-hud="radio-track">press N</div>
+  </div>
+
+  <div id="popups" class="hud-popups" data-hud="popups"></div>
+
+  <div class="hud-footer">WASD drive/walk · SPACE handbrake · F enter/steal car · E interact · CLICK shoot · 1-4 weapons · R reload · <b>N radio</b> · M map · ESC pause</div>
+
   <div id="wasted-screen" class="fullscreen">
     <h2>WASTED</h2>
     <p>Rook is down. Respawned at the hospital for $500, wanted cleared.</p>
@@ -80,8 +130,6 @@
     <h2>BUSTED</h2>
     <p>Captain Solano has you. Pay the fine and wanted cleared.</p>
   </div>
-  <div id="controls-footer" class="fullscreen"></div>
-  <div id="popups" class="fullscreen"></div>
   <div id="menu" class="fullscreen"></div>
   <div id="map-screen" class="fullscreen"></div>
   <div id="pause-screen" class="fullscreen"></div>
