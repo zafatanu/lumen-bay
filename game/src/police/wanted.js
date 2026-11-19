@@ -109,6 +109,7 @@ export function createWanted(state) {
     get heat() { return state.heat; },
     get escaped() { return state.escapes; },
     get busted() { return state.bustedCount; },
+    get policeFeed() { return state.policeFeed; },
     addHeat,
     setStars,
     update,
