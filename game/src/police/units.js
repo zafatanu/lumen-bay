@@ -1,7 +1,8 @@
 // LUMEN BAY police units: navy-white cruisers, a lone interceptor, roadblock
 // teams and a spotter helicopter ("HELI 1 'GULLWATCH'"). They drive the road
 // grid toward the player, ram his car, box him in when he stalls and — at high
-// stars — light him up from the sky. Names are original to Lumen Bay; none are
+// stars — light him up from the sky. Units drive the same road grid as traffic,
+// so a chase keeps to the boulevards. Names are original to Lumen Bay; none are
 // copied from any other game. Audio lives in the radio session; here it's
 // purely visual (flashing light bars, a spotlight cone) plus the AI that chases.
 import * as THREE from 'three';

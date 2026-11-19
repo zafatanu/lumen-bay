@@ -76,6 +76,8 @@ export function createInput() {
   window.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointerup', onPointerUp);
 
+  // On window blur (switching tabs, clicking out) release every held key so a
+  // stale "up" can't leave Rook driving into a wall or firing unattended.
   window.addEventListener('blur', () => {
     keys.up = keys.down = keys.left = keys.right = false;
     keys.sprint = keys.handbrake = keys.interact = keys.jump = false;

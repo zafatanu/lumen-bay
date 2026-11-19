@@ -3,6 +3,7 @@
 // over, then closes down the road grid, stops at a firing distance and trades
 // shots until badly hurt or dropped. A hurt gull runs off; cops stand.
 // Movement and fire are pure data: combat.js and main.js decide the hits.
+// Every enemy walks the same road grid as Rook, so cover reads as fair.
 import * as THREE from 'three';
 import { WORLD } from '../config.js';
 import { rand } from '../random.js';

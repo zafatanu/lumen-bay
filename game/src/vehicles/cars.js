@@ -83,7 +83,9 @@ export function buildCarMesh(def) {
     group.add(axle);
   }
 
-  // Headlights: two small emissive boxes at the front.
+  // Headlights: two small emissive boxes at the front. The emissive glow
+  // makes every car visible against the dusk skyline, so traffic pops in the
+  // chase shot without any extra lighting work.
   const lightMat = new THREE.MeshStandardMaterial({ color: 0xfff2d0, emissive: 0xffd9a0, emissiveIntensity: 1.4 });
   for (const x of [0.55, -0.55]) {
     const h = new THREE.Mesh(GEOMETRY.body, lightMat);

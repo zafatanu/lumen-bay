@@ -7,6 +7,8 @@ import { makeFacadeTexture } from '../render/scene.js';
 import { rand, randInt, pick } from '../random.js';
 
 // Concrete geometry shared across the whole city so we only make it once.
+// Every building/box/palm reuses these units, which keeps the draw call and
+// vertex budget flat however dense the island looks in a frame.
 const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1),
   cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 6),

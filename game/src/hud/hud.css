@@ -172,7 +172,8 @@
 }
 
 /* --hud-css-radio-- marker: radio widget */
-/* Centre-right: score popups — drift, near miss, shell, payout. */
+/* Centre-right: score popups — drift, near miss, shell, payout. They sit just
+   left of the speedo so a drift bonus does not hide the km/h readout. */
 #hud .hud-popups {
   position: absolute; top: 96px; right: 150px; text-align: right;
   pointer-events: none;

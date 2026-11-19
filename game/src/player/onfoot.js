@@ -1,5 +1,6 @@
 // LUMEN BAY on-foot player: Rook, the getaway driver, plus the third-person
-// follow camera and building collision for walking.
+// follow camera and building collision for walking. The player stays on the
+// road grid; stepping outside a block is clamped so Rook never clips a building.
 import * as THREE from 'three';
 import { WORLD, PLAYER } from '../config.js';
 import { buildGunMesh } from '../combat/weapons.js';

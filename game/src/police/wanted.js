@@ -1,6 +1,7 @@
 // LUMEN BAY wanted system: a 0-5 star heat meter that drives the police.
 // Heat climbs from crimes (stealing, shooting, hitting pedestrians) and fades
-// once the player escapes every unit; at zero heat the stars clear. The
+// once the player escapes every unit; at zero heat the stars clear. Heat also
+// fades slowly over time even while wanted, so a patient Rook can wait it out. The
 // controller owns the numeric state (stars, heat) and a small feed of nearby
 // units the HUD can read; the actual police units live in units.js.
 

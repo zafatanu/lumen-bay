@@ -26,6 +26,7 @@ import { createRadio } from './audio/radio.js';
 import { createMenu, loadSettings, saveSettings } from './meta/menu.js';
 import { createMap } from './meta/map.js';
 import { createPause } from './meta/pause.js';
+import { stageShot, SHOT_SCENES } from './shots.js';
 
 // --- Deterministic seed: the URL may override the fixed default. ---
 const params = new URLSearchParams(window.location.search);
@@ -527,7 +528,7 @@ function boot() {
     camera.updateProjectionMatrix();
   }
 
-  function step(dt) {
+  function step(dt, snapOverride) {
     state.advanceClock(dt);
 
     // Ferris wheel spins slowly whenever it exists.
@@ -535,7 +536,10 @@ function boot() {
       city.wheel.userData.spin.rotation.z += dt * 0.08;
     }
 
-    const snap = input.snapshot();
+    // The screenshot autopilot (shots.js) may pass a scripted snapshot so the
+    // world plays forward without real keyboard/mouse events; a plain load
+    // reads the live input controller as usual.
+    const snap = snapOverride || input.snapshot();
     onFoot.setWeapon(arsenal.current.id);
 
     if (state.down) {
@@ -574,7 +578,8 @@ function boot() {
     }
 
     // Combat runs every step: ammo/reload, flashes, enemy AI and any hits.
-    combat.update(dt, input, camera);
+    // The screenshot autopilot's snapshot flows through so Rook can fire.
+    combat.update(dt, input, camera, snapOverride);
 
     // Police: units drive at Rook, ram his car and — on foot, up close — bust
     // him. Rook's position and speed feed the chase; the result can shove the
@@ -642,12 +647,28 @@ function boot() {
   window.addEventListener('resize', resize);
   resize();
 
-  // --- ?shot= staging hook: let the chase cam settle, render once, then signal.
+  // --- ?shot= staging hook: stage a real, autopiloted scene (shots.js) into
+  // the live world, then let the render loop paint it for a few frames before
+  // signalling the screenshot harness via window.__shotReady. ---
   if (params.has('shot')) {
-    setScreen('play');
-    for (let i = 0; i < 20; i += 1) step(STEP);
-    update(STEP, state.clockMinutes);
-    requestAnimationFrame(() => { window.__shotReady = true; });
+    const shotName = params.get('shot');
+    const shotCtx = {
+      state, city, driver, onFoot, arsenal, enemies, wanted, police, combat,
+      mission, sideJobs, input, scene, camera, spawn, traffic, hud,
+      crosshair: crosshairEl, parked, CARS, MISSIONS: missionCatalog,
+      setScreen, ensureRadio, applySettings,
+      stepWorld: step, update,
+    };
+    stageShot(SHOT_SCENES.includes(shotName) ? shotName : '3-menu', shotCtx);
+    let stagedFrames = 0;
+    const flagReady = () => {
+      stagedFrames += 1;
+      if (stagedFrames < 3) requestAnimationFrame(flagReady);
+      else window.__shotReady = true;
+    };
+    requestAnimationFrame(flagReady);
+    requestAnimationFrame(frame);
+    return;
   }
 
   requestAnimationFrame(frame);

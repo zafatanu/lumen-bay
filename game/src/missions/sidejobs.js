@@ -1,6 +1,7 @@
 // LUMEN BAY side jobs + collectibles: taxi fares, taco runs, a street race
 // and 24 collectible conch shells. Each side job reuses the mission-stage
 // pattern (pickup markers, countdown, payout on completion, fail on timeout).
+// Jobs are repeatable; shells are one-per-run and pay a flat $100 each.
 // Conch shells sit at fixed city spots; walk within 3m to pick one up.
 import * as THREE from 'three';
 import { SHELLS, SIDE_JOBS, SHELL_TOTAL, districtPoint } from './catalog.js';

@@ -1,7 +1,7 @@
 // LUMEN BAY mission catalog: 8 story chapters, 3 side jobs and the 24
 // collectible conch shells, plus the named cast. Pure data, no scene.
 // Districts use the config centres: Coral Beach, Downtown, Old Quarter,
-// Dockside, Marina.
+// Dockside, Marina. Each mission is a stage list the engine walks in order.
 
 import { DISTRICTS } from '../config.js';
 

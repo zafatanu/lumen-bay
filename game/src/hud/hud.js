@@ -1,7 +1,8 @@
 // LUMEN BAY dense HUD: mission, police, minimap, wanted, speedo, dialogue,
 // weapons, radio widget and score popups. Reads shared `state` every frame
 // and writes plain DOM + canvas; positions come from config so the 1280x800
-// layout stays legible. No network, no external assets.
+// layout stays legible. Nothing here is clickable — the HUD is read-only,
+// and all interaction lives in the menu/map/pause overlays. No network.
 import { WORLD, DISTRICTS, CAR, POLICE } from '../config.js';
 import { WEAPONS } from '../combat/weapons.js';
 

@@ -93,6 +93,8 @@ export function createDriver(state, city, scene) {
     const accel = def.accel;
 
     // --- Throttle / brake / reverse. A totaled car (condition 0) is immobile. ---
+    // Throttle is clamped to topSpeed, reverse tops out at CAR.reverse, and a
+    // dead car just coasts to a stop so a wrecked ride can't be steered around.
     const drivable = condition > 0;
     if (drivable && input.up) {
       if (speed >= 0) speed = Math.min(top, speed + accel * dt);

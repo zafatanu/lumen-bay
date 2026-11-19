@@ -1,79 +1,212 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Deterministic screenshot scenes behind ?shot=1-chase|2-shootout|3-menu|4-map.
+// Each stages the REAL game forward from a fresh world, steered by a scripted
+// autopilot, so the frame is what a real play session looks like and the same
+// seed always gives the same frame. `ctx` bundles the live boot() systems:
+// state, driver, onFoot, arsenal, enemies, wanted, police, mission, sideJobs,
+// input, scene, camera, traffic, hud, plus setScreen/ensureRadio/stepWorld.
+import { STEP } from './config.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+export const SHOT_SCENES = ['1-chase', '2-shootout', '3-menu', '4-map'];
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+/** Reset the shared state and set the missions list with `doneThrough` chapters
+ *  DONE (0 = none) and the following chapter ACTIVE, so the menu CONTINUE and
+ *  the map panel both read a believable, mid-story save. */
+function freshState(ctx, { doneThrough = 0, money = 2400, day = 1, rep = 1, repXp = 0 } = {}) {
+  ctx.state.reset();
+  ctx.state.money = money;
+  ctx.state.day = day;
+  ctx.state.rep = rep;
+  ctx.state.repXp = repXp;
+  ctx.state.missions = (ctx.MISSIONS || []).map((m) => {
+    const n = parseInt(String(m.id).replace(/\D/g, ''), 10);
+    if (doneThrough > 0 && n <= doneThrough) return { id: m.id, status: 'DONE' };
+    if (doneThrough + 1 === n) return { id: m.id, status: 'ACTIVE' };
+    return { id: m.id, status: 'LOCKED' };
+  });
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+/** A driving snapshot: full throttle straight ahead on the boulevard. */
+function driveSnap() {
+  return { up: true, down: false, left: false, right: false, sprint: false,
+    handbrake: false, interact: false, jump: false, honk: false, recover: false,
+    weapon: 1, mouseX: 400, mouseY: 240, mouseDown: false };
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+/** An on-foot snapshot: standing (or walking) with the SMG held, trigger down
+ *  when `fire` is true so a muzzle flash is caught mid-frame. */
+function shootSnap(fire) {
+  return { up: false, down: false, left: false, right: false, sprint: false,
+    handbrake: false, interact: false, jump: false, honk: false, recover: false,
+    weapon: 3, mouseX: 400, mouseY: 240, mouseDown: fire };
+}
+
+// --shots-helpers-- marker: helpers append below
+
+export function stageShot(name, ctx) {
+  switch (name) {
+    case '1-chase': return stageChase(ctx);
+    case '2-shootout': return stageShootout(ctx);
+    case '4-map': return stageMap(ctx);
+    case '3-menu':
+    default: return stageMenu(ctx);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+}
+
+// --shots-chase-- marker: chase scene appends below
+
+/** Sunset police chase on the Coral Beach boulevard: Rook floors a Neon Comet
+ *  with three wanted stars, four PD units in pursuit plus the GULLWATCH heli
+ *  spotlight overhead, mission panel on The Getaway, HUD live, a drift popup
+ *  queued. ~20s of real autopilot driving before the frame renders. */
+function stageChase(ctx) {
+  const { state, driver, onFoot, wanted, scene, camera } = ctx;
+
+  freshState(ctx, { doneThrough: 2, money: 8400, day: 1, rep: 2, repXp: 20 });
+  ctx.applySettings();
+  ctx.ensureRadio();
+
+  // Drop the parked starter mesh if it still exists, so it can't collide.
+  if (ctx.parked) { scene.remove(ctx.parked.mesh); ctx.parked = null; }
+
+  // Enter a Neon Comet on a north-south boulevard along the Coral Beach coast.
+  const neon = (ctx.CARS || []).find((c) => c.name === 'Neon Comet') || ctx.CARS[2];
+  const x = -141;   // road centreline on the west (coast) side of the grid
+  const z = -70;
+  driver.enterCar(neon, { x, y: 0, z });
+  onFoot.hide();   // Rook is behind the wheel now, not standing on the road
+  state.inCar = true;
+  state.currentCar = { name: neon.name, condition: 100, fuel: 100, nitro: 30 };
+  state.speedKmh = 0;
+
+  // Three-star manhunt: the wanted controller + police units do the rest.
+  wanted.setStars(3);
+  state.stars = 3;
+  state.health = 64;
+  state.armour = 20;
+
+  // Mission panel: The Getaway, on the final (escape) stage.
+  state.currentMission = 'The Getaway';
+  state.missionStage = 'STAGE 3/3';
+  state.missionNext = 'STAGE 3/3: Lose the three-star chase and the heli';
+  state.missionTimer = null;
+
+  // Chase camera follows the car.
+  driver.updateCamera(camera, 0.016);
+  camera.lookAt(x, 1.2, z);
+
+  // ~20s of real driving + police pursuit along the boulevard.
+  const snap = driveSnap();
+  for (let i = 0; i < 1200; i += 1) {
+    ctx.stepWorld(STEP, snap);
+    // A light weave keeps the shot from dead straight; straight reads cleaner.
+    if (i === 500) ctx.stepWorld(STEP, { ...snap, left: true });
+    if (i === 600) ctx.stepWorld(STEP, { ...snap, right: true });
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+
+  // Leave the crosshair off the wheel and a drift payout popup on screen.
+  state.pushPopup('DRIFT x2 +$100');
+  state.driftScore += 200;
+  state.money += 100;
+
+  ctx.hud.update(STEP);
+  ctx.update(STEP, state.clockMinutes);
+}
+
+// --shots-shootout-- marker: shootout scene appends below
+
+/** On-foot shootout in Dockside at dusk: Rook behind cover with the Tide SMG,
+ *  three Gulls closing with hostile markers overhead, health + armour bars
+ *  live, crosshair on, and a muzzle flash caught mid-frame from the last
+ *  trigger pull. */
+function stageShootout(ctx) {
+  const { state, onFoot, arsenal, enemies, combat, scene, camera } = ctx;
+
+  freshState(ctx, { doneThrough: 3, money: 12300, day: 1, rep: 3, repXp: 60 });
+  ctx.applySettings();
+  ctx.ensureRadio();
+
+  // Rook on foot on a Dockside road, braced for a fight.
+  const px = 229;
+  const pz = -67;
+  onFoot.setPosition({ x: px, y: 0, z: pz }, 0);
+  onFoot.show();
+  state.inCar = false;
+
+  // Tide SMG unlocked and in hand.
+  state.rep = 3;
+  arsenal.refillAll();
+  arsenal.select(2);   // slot 2 (0-based) -> Tide SMG
+
+  // Health + armour bars read as a fight already in progress.
+  state.health = 78;
+  state.armour = 46;
+
+  // Three Gulls stand down the road, hostile markers up.
+  for (let i = 0; i < 3; i += 1) {
+    enemies.spawnEnemy('gull', { x: px - 9 - i * 3, z: pz }, { health: 88 });
+  }
+
+  // Frame the fight head-on: the camera already swings to aim via combat.
+  camera.lookAt(px - 10, 1.2, pz);
+
+  // ~1.6s of real combat: Rook holds the trigger so a muzzle flash is live.
+  for (let i = 0; i < 96; i += 1) {
+    ctx.stepWorld(STEP, shootSnap(true));
+  }
+
+  ctx.hud.update(STEP);
+  ctx.update(STEP, state.clockMinutes);
+}
+
+// --shots-menu-- marker: menu scene appends below
+
+/** The title menu over the sunset city: menu open with CONTINUE showing the
+ *  mid-story save, the character roster visible, and the slow camera orbit
+ *  running so the skyline reads behind the panel. */
+function stageMenu(ctx) {
+  const { state } = ctx;
+
+  // A believable Ch.5 save: five chapters done, Ch.6 waiting.
+  freshState(ctx, { doneThrough: 5, money: 31420, day: 3, rep: 4, repXp: 220 });
+  state.health = 88;
+  state.armour = 25;
+  state.shells = 9;
+  state.carsStolen = 14;
+  state.takedowns = 6;
+  state.escapes = 3;
+
+  ctx.applySettings();
+  ctx.ensureRadio();
+
+  // Open the menu screen; menuRefresh() rebuilds CONTINUE from the save above.
+  ctx.setScreen('menu');
+
+  ctx.hud.update(STEP);
+  ctx.update(STEP, state.clockMinutes);
+}
+
+// --shots-map-- marker: map scene appends below
+
+/** The full map screen open over the island: districts, the mission list,
+ *  career stats and the legend in the side panel, player + police blips on
+ *  the canvas. */
+function stageMap(ctx) {
+  const { state } = ctx;
+
+  // A mid-story career for the stats panel + mission list.
+  freshState(ctx, { doneThrough: 4, money: 31420, day: 2, rep: 4, repXp: 175 });
+  state.shells = 6;
+  state.carsStolen = 11;
+  state.takedowns = 9;
+  state.escapes = 5;
+  state.playSeconds = 3874;
+
+  ctx.applySettings();
+  ctx.ensureRadio();
+
+  // Open the map; createMap() builds the canvas + panel from state.
+  ctx.setScreen('map');
+
+  ctx.hud.update(STEP);
+  ctx.update(STEP, state.clockMinutes);
 }

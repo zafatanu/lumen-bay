@@ -1,5 +1,6 @@
 // LUMEN BAY character portraits: flat-colour stylised faces drawn on a
 // 128x128 canvas per character, returned as data-URLs for the dialogue HUD.
+// One portrait is cached per character, so the dialogue panel never redraws.
 // Distinct colour blocks: face shape, hair, jacket colour, a district-tinted
 // background and a name tag. No photos, no likeness — original art only.
 

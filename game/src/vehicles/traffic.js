@@ -1,5 +1,7 @@
 // LUMEN BAY traffic + pedestrians: cars cruise the road grid, pedestrians
 // walk the sidewalks and cross at crosswalks, and both flee from cars.
+// The traffic layer stays lightweight: a fixed pool of cars is recycled, so
+// a crowded boulevard never allocates new meshes during a chase.
 import * as THREE from 'three';
 import { WORLD } from '../config.js';
 import { CARS, buildCarMesh } from './cars.js';

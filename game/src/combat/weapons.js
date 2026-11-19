@@ -1,6 +1,7 @@
 // LUMEN BAY weapon catalog: the four things Rook carries. Fists are always
 // there; the three firearms unlock as REP climbs. This module owns only
 // ammo, fire rate and reloading; whether a shot lands is combat.js's call.
+// Slots stay in hotbar order so HUD key 1-4 lines up with arsenal.select().
 import * as THREE from 'three';
 
 /** Weapon definitions, in hotbar order (keys 1-4). */

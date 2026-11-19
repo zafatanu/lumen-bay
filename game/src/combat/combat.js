@@ -390,7 +390,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
 
   /** Advance a fixed step of the fight: weapons, flashes, firing, enemy shots,
    *  reload and crosshair. `input` is the shared input controller. */
-  function update(dt, input, camera) {
+  function update(dt, input, camera, snapOverride) {
     arsenal.update(dt);
     flashes.update(dt);
     for (const tr of tracers) {
@@ -401,7 +401,7 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     if (hurtFlash > 0) hurtFlash = Math.max(0, hurtFlash - dt * 3);
     if (armSwing > 0) armSwing = Math.max(0, armSwing - dt * 6);
 
-    const snap = input.snapshot();
+    const snap = snapOverride || input.snapshot();
     const wantIdx = snap.weapon - 1;
     if (arsenal.index !== snap.weapon) arsenal.select(wantIdx);
     const cur = arsenal.current;

@@ -64,6 +64,8 @@ export function createRenderer3D(canvas) {
   camera.lookAt(0, 0, 0);
 
   // --- Sunset sky dome: big sphere with a vertex-colour gradient. ---
+  // The single gradient sphere wraps the whole island, so the same dusk
+  // palette tints every district and no skybox texture ever loads.
   const skyGeo = new THREE.SphereGeometry(1500, 32, 24);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,

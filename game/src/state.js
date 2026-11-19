@@ -75,6 +75,7 @@ export function createState() {
       const raw = window.localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       Object.assign(state, fresh(), JSON.parse(raw));
+      state.formatClock = formatClock;
       // Coerce saved fields back to numbers: an old or hand-edited save must
       // not poison the sim with string arithmetic.
       const numeric = ['money', 'rep', 'xp', 'day', 'clockMinutes', 'health', 'armour', 'stars',
@@ -99,6 +100,7 @@ export function createState() {
 
   function reset() {
     Object.assign(state, fresh());
+    state.formatClock = formatClock;
   }
 
   function advanceClock(realSeconds) {
@@ -160,6 +162,11 @@ export function createState() {
   function addRepXp(amount) {
     state.repXp = (state.repXp || 0) + amount;
   }
+
+  // The HUD (hud.js) reads state.formatClock() for the day/clock readout every
+  // frame; expose the clock formatter on the state object so that call can't
+  // throw a TypeError on a plain load. JSON serialisation drops the function.
+  state.formatClock = formatClock;
 
   /** Story completion percentage: DONE missions over the 8-chapter catalog.
    *  Uses the missions list on state; a side-job/taxi run with no missions

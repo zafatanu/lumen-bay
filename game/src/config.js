@@ -27,7 +27,9 @@ export const SEA = {
   extent: 260,     // how far west the water plane reaches past the coast
 };
 
-/** The five original districts. centre is {x,z} world coords of the district hub. */
+/** The five original districts. centre is {x,z} world coords of the district hub.
+ *  Each palette colours its buildings; the whole set is handed to the city so
+ *  district identity reads clearly on the map screen and in the street. */
 export const DISTRICTS = [
   { name: 'Coral Beach', centre: { x: -230, z: -230 }, palette: ['#ffd9e6', '#ffe3c4', '#ffc9a3', '#f7d7b5'], minH: 12, maxH: 26 },
   { name: 'Downtown',    centre: { x: 40,  z: 40  }, palette: ['#b8c6ff', '#c9b6ff', '#9fb8ff', '#b3a8ff'], minH: 30, maxH: 60 },

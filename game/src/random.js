@@ -1,5 +1,7 @@
 // A small seeded random number generator (mulberry32): the same seed gives the
 // same city and the same events, which is what makes scenes reproducible.
+// Every procedural placement in the island feeds off this one stream, so a
+// fixed URL seed (e.g. ?shot=1-chase&seed=1) reconstructs the exact frame.
 
 export function createRandom(seed) {
   let a = seed | 0;

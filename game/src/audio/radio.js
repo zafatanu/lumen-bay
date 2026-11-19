@@ -1,7 +1,8 @@
 // LUMEN BAY radio: three original WebAudio synth stations, no audio files.
 // Each station is a small step-sequencer (oscillator + gain envelopes) with its
 // own waveform, tempo and track list. The AudioContext is created lazily and
-// must be resumed from a user gesture before sound is heard.
+// must be resumed from a user gesture before sound is heard — Rook's radio
+// only comes on after the player has interacted with the page at least once.
 
 const STATIONS = [
   {

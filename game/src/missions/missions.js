@@ -1,7 +1,8 @@
 // LUMEN BAY mission engine: drives the 8-story missions from catalog.js.
 // A mission is a list of stages; each frame the active stage is checked and
 // completes when its condition is met, feeding onStage/onDialogue callbacks
-// so main.js can pay out, spawn enemies, set wanted stars and save.
+// so main.js can pay out, spawn enemies, set wanted stars and save. Only one
+// mission runs at a time; starting another cancels the current run cleanly.
 import { MISSIONS, districtPoint } from './catalog.js';
 
 const DRIVE_RANGE = 8;   // metres: close enough to "arrive" at a target
