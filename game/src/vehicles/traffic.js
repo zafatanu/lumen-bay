@@ -20,10 +20,11 @@ function headingFor(axis, dir) {
   return dir > 0 ? 0 : Math.PI;
 }
 
-/** Build a traffic car mesh from a random catalog entry. */
+/** Build a traffic car mesh from a random catalog entry. Traffic cars are
+ *  crewed: the seated driver reads through the glass canopy. */
 function makeTrafficCar(rng) {
   const def = { ...pick(rng, CARS), colour: pick(rng, [0xffffff, 0x9aa3ae, 0xd2a23b, 0x4fb3ff, 0x7a7f88, 0xd2473b, 0x3c8f4f, 0xe8e4d8, 0x5a6b80, 0x9c5f3c]) };
-  const mesh = buildCarMesh(def);
+  const mesh = buildCarMesh(def, { driver: true });
   return { def, mesh };
 }
 

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { WORLD, PLAYER } from '../config.js';
 import { buildGunMesh } from '../combat/weapons.js';
+import { limb, swingWalk, STRIDE } from '../figure.js';
 
 function roadLine(i) {
   const west = -WORLD.total / 2;
@@ -76,7 +77,10 @@ function roadUnionExit(colliders, ox, oz, tx, tz) {
   return Math.min(1, end);
 }
 
-/** Build Rook: teal jacket, dark jeans, cap. Returns a THREE.Group. */
+/** Build Rook: teal jacket, dark jeans, cap. Returns a THREE.Group whose
+ *  legs/arms hang from hip/shoulder pivots and whose head sits on a neck
+ *  pivot (userData.limbs), so the walk cycle can swing them — the same rig
+ *  the pedestrians use in vehicles/traffic.js. Rest pose is unchanged. */
 export function buildPlayerMesh() {
   const group = new THREE.Group();
   const jacket = new THREE.MeshStandardMaterial({ color: 0x1fb9a8, roughness: 0.7 });
@@ -84,35 +88,33 @@ export function buildPlayerMesh() {
   const cap = new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.8 });
   const skin = new THREE.MeshStandardMaterial({ color: 0xd9a87c, roughness: 0.85 });
 
-  // Legs.
+  // Legs on hip pivots: the cylinder hangs below the pivot, so rotation.x
+  // swings the whole leg about the hip (rest: feet on the ground at y=0).
   const legGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.72, 6);
-  for (const lx of [0.16, -0.16]) {
-    const leg = new THREE.Mesh(legGeo, jeans);
-    leg.position.set(lx, 0.36, 0);
-    group.add(leg);
-  }
+  const legL = limb(group, 0.16, 0.72, legGeo, jeans, 0.72);
+  const legR = limb(group, -0.16, 0.72, legGeo, jeans, 0.72);
   // Body: teal jacket, taller to read as a driver's coat.
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.72, 8), jacket);
   body.position.y = 0.98;
   group.add(body);
-  // Arms.
+  // Arms on shoulder pivots, hanging to the same rest height as before.
   const armGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.7, 5);
-  for (const ax of [0.4, -0.4]) {
-    const arm = new THREE.Mesh(armGeo, jacket);
-    arm.position.set(ax, 1.1, 0);
-    group.add(arm);
-  }
-  // Head.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), skin);
+  const armL = limb(group, 0.4, 1.45, armGeo, jacket, 0.7);
+  const armR = limb(group, -0.4, 1.45, armGeo, jacket, 0.7);
+  // Head on a neck pivot: skull + cap + brim bob together with the steps.
+  const head = new THREE.Group();
   head.position.y = 1.62;
-  group.add(head);
-  // Cap: a flat box + a small brim.
+  head.userData.baseY = 1.62;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), skin);
+  head.add(skull);
   const capTop = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.08, 8), cap);
-  capTop.position.y = 1.82;
-  group.add(capTop);
+  capTop.position.y = 0.2;
+  head.add(capTop);
   const brim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.04, 0.26), cap);
-  brim.position.set(0, 1.78, 0.16);
-  group.add(brim);
+  brim.position.set(0, 0.16, 0.16);
+  head.add(brim);
+  group.add(head);
+  group.userData.limbs = { legL, legR, armL, armR, head, body };
   return group;
 }
 
@@ -188,6 +190,8 @@ export function createOnFoot(state, city, scene) {
   let recoil = 0;          // 1 on a shot, decays fast (torso + gun kick)
   let flinch = 0;          // 1 when hit, decays (reel back + twist)
   let prevMoveSpeed = 0;   // commanded speed last step, for the accel lean
+  let walkPhase = 0;       // gait angle, advanced by distance travelled
+  let walkAmp = 0;         // eased 0..1 gait amount; 0 settles limbs to neutral
   let lastMag = null;      // magazine last step: a drop means a shot fired
   let lastHealth = null;   // health/armour last step: a drop means a hit
   let lastArmour = null;
@@ -219,6 +223,9 @@ export function createOnFoot(state, city, scene) {
     prevVisHeading = heading;
     leanPitch = leanRoll = recoil = flinch = 0;
     prevMoveSpeed = 0;
+    walkPhase = 0;
+    walkAmp = 0;
+    swingWalk(mesh.userData.limbs, 0, 0);   // teleport lands in neutral, not mid-stride
     lastMag = magOf(gunFor);
     lastHealth = state.health;
     lastArmour = state.armour;
@@ -308,6 +315,16 @@ export function createOnFoot(state, city, scene) {
     const roll = leanRoll + flinch * 0.13;
     mesh.rotation.set(pitch, visHeading, roll);
     if (gun) gun.rotation.x = -recoil * 0.30;   // muzzle flips up on the shot
+    // Walk/run cycle: the phase advances with distance travelled (moveSpeed
+    // * dt), and the gait amount eases in/out so idle limbs settle back to
+    // neutral instead of freezing mid-stride. Composes with the whole-mesh
+    // lean/bank/recoil above (the gun stays parented to the root, so its
+    // recoil is untouched) — it never touches pos, heading or collision.
+    walkPhase += moveSpeed * vdt * STRIDE;
+    if (walkPhase > Math.PI * 2) walkPhase -= Math.PI * 2;
+    const gaitT = moveSpeed > 0.01 ? 1 : 0;
+    walkAmp += (gaitT - walkAmp) * Math.min(1, vdt * 8);
+    swingWalk(mesh.userData.limbs, walkPhase, walkAmp);
   }
 
   return { mesh, update, setWeapon, setPosition, getPosition, hide, show, get heading() { return heading; } };

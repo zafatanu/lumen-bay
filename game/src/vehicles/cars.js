@@ -3,6 +3,7 @@
 // four cylinder wheels, dark window boxes and emissive headlights.
 // The catalog is shared by the parked starter car, traffic and car stealing.
 import * as THREE from 'three';
+import { buildPlayerMesh } from '../player/onfoot.js';
 
 /** The eight original Lumen Bay cars. */
 export const CARS = [
@@ -19,10 +20,19 @@ export const CARS = [
 const GEOMETRY = {
   body: new THREE.BoxGeometry(1, 1, 1),
   wheel: new THREE.CylinderGeometry(1, 1, 1, 10),
+  wheelRing: new THREE.TorusGeometry(0.13, 0.022, 6, 12),
 };
 
 /** Emissive windshield glass so cars read at dusk. */
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x0c1622, roughness: 0.15, metalness: 0.6 });
+
+/** See-through canopy glass for cars carrying a visible driver: the same
+ *  dusk tint, but transparent (and no depth write) so the seated figure
+ *  reads inside instead of hiding behind a painted box. */
+const canopyMat = new THREE.MeshStandardMaterial({
+  color: 0x0c1622, roughness: 0.15, metalness: 0.6,
+  transparent: true, opacity: 0.5, depthWrite: false,
+});
 
 function bodyMat(colour) {
   return new THREE.MeshStandardMaterial({ color: colour, roughness: 0.4, metalness: 0.45 });
@@ -31,10 +41,13 @@ function bodyMat(colour) {
 /** Build a low-poly car mesh from a catalog definition.
  *  Returns a THREE.Group positioned at the origin, oriented +Z forward,
  *  with `.userData.def` set to the catalog entry and `.userData.body` holding
- *  the wheel collider radius for physics. */
-export function buildCarMesh(def) {
+ *  the wheel collider radius for physics. `opts.driver` adds a seated
+ *  driver figure under a glass canopy — visual only: the collider, the
+ *  car's extents and the driving physics are untouched. */
+export function buildCarMesh(def, opts = {}) {
   const group = new THREE.Group();
   const paint = bodyMat(def.colour);
+  const withDriver = !!opts.driver;
 
   const body = new THREE.Mesh(GEOMETRY.body, paint);
   body.scale.set(1.9, 0.62, 4.1);
@@ -52,30 +65,38 @@ export function buildCarMesh(def) {
   group.add(hood);
 
   // Cabin: a smaller box on top. The convertible sits lower with no top box.
+  // With a driver aboard the closed cabin becomes a glass canopy so the
+  // figure is visible; the convertible keeps its painted low sides (the
+  // driver's head reads above them, open-top style).
   const isConvertible = def.name === 'Coral Cruiser';
-  const cab = new THREE.Mesh(GEOMETRY.body, paint);
+  const glassCab = withDriver && !isConvertible;
+  const cab = new THREE.Mesh(GEOMETRY.body, glassCab ? canopyMat : paint);
   const cabH = isConvertible ? 0.42 : 0.62;
   cab.scale.set(1.5, cabH, 2.0);
   cab.position.set(0, body.position.y + 0.42, -0.2);
-  cab.castShadow = true;
+  cab.castShadow = !glassCab;
   group.add(cab);
 
-  // Windows: dark glass boxes inset into the cabin sides and rear.
+  // Windows: dark glass boxes inset into the cabin sides and rear. A driver
+  // car skips them — the opaque strips would hide the figure behind the
+  // canopy; the tinted canopy itself reads as the glazing.
   const winH = isConvertible ? 0.2 : 0.34;
-  for (const [dx, dz, w, d] of [
-    [0, -0.6, 0.2, 1.0], // rear
-    [0.78, -0.2, 0.18, 1.7], // left
-    [-0.78, -0.2, 0.18, 1.7], // right
-  ]) {
-    const win = new THREE.Mesh(GEOMETRY.body, glassMat);
-    win.scale.set(w, winH, d);
-    win.position.set(dx, body.position.y + 0.42 + winH / 2, dz);
-    group.add(win);
+  if (!withDriver) {
+    for (const [dx, dz, w, d] of [
+      [0, -0.6, 0.2, 1.0], // rear
+      [0.78, -0.2, 0.18, 1.7], // left
+      [-0.78, -0.2, 0.18, 1.7], // right
+    ]) {
+      const win = new THREE.Mesh(GEOMETRY.body, glassMat);
+      win.scale.set(w, winH, d);
+      win.position.set(dx, body.position.y + 0.42 + winH / 2, dz);
+      group.add(win);
+    }
   }
 
   // Windshield: a glass plane leaned back over the hood instead of a flat
   // front window box, so the cabin front reads as a rake, not a slab.
-  const shield = new THREE.Mesh(GEOMETRY.body, glassMat);
+  const shield = new THREE.Mesh(GEOMETRY.body, withDriver ? canopyMat : glassMat);
   shield.scale.set(1.42, cabH + 0.05, 0.06);
   shield.position.set(0, body.position.y + 0.42 + cabH / 2 - 0.02, 0.86);
   shield.rotation.x = -0.42;
@@ -124,6 +145,31 @@ export function buildCarMesh(def) {
   tail.scale.set(1.6, 0.1, 0.12);
   tail.position.set(0, 0.66, -2.06);
   group.add(tail);
+
+  // Seated driver: Rook's own torso/head/arms rig (buildPlayerMesh) posed
+  // at the wheel — thighs forward under the dash, hands out to the rim,
+  // slight seat recline. Scaled to fit under the roofline and parked on the
+  // right-side seat (Lumen Bay drives on the left). Purely visual: it sits
+  // inside the existing cabin volume, so the collider (userData.body below),
+  // the car's extents and the driving physics never change.
+  if (withDriver) {
+    const fig = buildPlayerMesh();
+    const limbs = fig.userData.limbs;
+    limbs.legL.rotation.x = -Math.PI / 2;   // thighs forward, hidden in the body
+    limbs.legR.rotation.x = -Math.PI / 2;
+    limbs.armL.rotation.set(-1.35, 0, -0.3); // hands forward and inward to the wheel
+    limbs.armR.rotation.set(-1.35, 0, 0.3);
+    limbs.body.rotation.x = -0.12;           // slight seat recline
+    fig.scale.setScalar(0.52);
+    fig.position.set(-0.35, 0.37, -0.25);
+    group.add(fig);
+    // Steering wheel: one thin torus the hands reach, tilted toward the seat.
+    const wheel = new THREE.Mesh(GEOMETRY.wheelRing, tyreMat);
+    wheel.position.set(-0.35, 0.99, 0.12);
+    wheel.rotation.x = -0.35;
+    group.add(wheel);
+    group.userData.driver = fig;
+  }
 
   // A wheel radius the driving physics uses for the circle collider.
   group.userData.def = def;

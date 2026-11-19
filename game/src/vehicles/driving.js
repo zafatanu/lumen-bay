@@ -178,7 +178,9 @@ export function createDriver(state, city, scene) {
   function enterCar(carDef, position, startHeading = 0) {
     if (car) return;
     def = carDef;
-    car = buildCarMesh(def);
+    // Rook rides visible at the wheel: the seated driver is visual only.
+    // The ?stage=chase cover enters through here too, so it inherits him.
+    car = buildCarMesh(def, { driver: true });
     pos.copy(position);
     pos.y = 0;
     // Optional facing for live staging (?stage=chase); normal play always 0.
