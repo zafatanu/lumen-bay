@@ -261,6 +261,15 @@ function stageShootout(ctx) {
   // so the capture catches it mid-topple (0.7s fall + 0.6s fade, enemies.js)
   // while the four main Gulls stay standing. The mission panel counts it.
   enemies.damage(fifth, 999);
+  // The capture freeze holds step(), so the fall timer never advances on its
+  // own and the body would stay upright at t=0. Pose it at the SAME rotation
+  // the live fall computes (enemies.js: t = 1 - fall/FALL_TIME), 55% through
+  // the topple — clearly dropping, marker still up (it hides only in fade).
+  {
+    const fallTime = fifth.fall;   // FALL_TIME, as damage() just set it
+    fifth.fall = fallTime * 0.45;
+    fifth.mesh.rotation.x = Math.min(Math.PI / 2, (1 - fifth.fall / fallTime) * Math.PI / 2);
+  }
   state.missionNext = 'STAGE 2/3: Clear the Gulls off the crates · 1 down';
 
   // Refill again right before the capture frame: a mid-hold reload must not
@@ -314,6 +323,12 @@ function stageMenu(ctx) {
   ctx.applySettings();
   ctx.ensureRadio();
 
+  // Persist the staged career through the REAL save path so the menu's
+  // CONTINUE button reads enabled with the mid-story summary (menu.js gates
+  // it on localStorage, not on state). Staging only: same save format, and
+  // every other shot resets state without loading it.
+  state.save();
+
   // Open the menu screen; menuRefresh() rebuilds CONTINUE from the save above.
   ctx.setScreen('menu');
 
@@ -327,7 +342,7 @@ function stageMenu(ctx) {
  *  career stats and the legend in the side panel, player + police blips on
  *  the canvas. */
 function stageMap(ctx) {
-  const { state } = ctx;
+  const { state, scene } = ctx;
 
   // A mid-story career for the stats panel + mission list.
   freshState(ctx, { doneThrough: 4, money: 31420, day: 2, rep: 4, repXp: 175 });
@@ -336,6 +351,18 @@ function stageMap(ctx) {
   state.takedowns = 9;
   state.escapes = 5;
   state.playSeconds = 3874;
+
+  // Staged consistency: the panel reads 6/24 conches, so the six west-coast
+  // shells (catalog order 0-5 — the coast route a fresh run walks first)
+  // are flagged taken on their LIVE placeShells() handles and their meshes
+  // dropped, so the map blips show the 18 still out there. Staging only:
+  // live pickup logic, state.shells and the save format are untouched.
+  if (ctx.shells) {
+    for (let i = 0; i < 6 && i < ctx.shells.length; i += 1) {
+      ctx.shells[i].taken = true;
+      scene.remove(ctx.shells[i].mesh);
+    }
+  }
 
   ctx.applySettings();
   ctx.ensureRadio();

@@ -5,7 +5,8 @@
 // and all interaction lives in the menu/map/pause overlays. No network.
 import { WORLD, DISTRICTS, CAR, POLICE } from '../config.js';
 import { WEAPONS } from '../combat/weapons.js';
-import { SHELLS, MISSIONS } from '../missions/catalog.js';
+import { SHELLS, MISSIONS, CHARACTERS } from '../missions/catalog.js';
+import { drawPortrait } from '../missions/characters.js';
 
 const MINIMAP = 192;          // canvas px square
 const WORLD_W = WORLD.total;  // island span in metres
@@ -62,6 +63,42 @@ export function createHud(state, dom, opts = {}) {
   const radioStation = $('[data-hud="radio-station"]');
   const radioTrack = $('[data-hud="radio-track"]');
   const popupsEl = $('[data-hud="popups"]');
+
+  // ---- Crew chip row (P10) ------------------------------------------------
+  // The three ACTIVE crew — Mama Luz (fixer), Tito (mechanic), Ivy (hacker):
+  // the mission givers who run Rook's jobs. Rook is the player behind the
+  // wheel; Solano and Kestrel are the antagonists, not crew. The catalog
+  // cast is pure narrative data (catalog.js CHARACTERS: name/role/district/
+  // colour/bio) with NO ability, passive or cooldown mechanics anywhere in
+  // the sim, so the chips show portrait + name + role only — never invented
+  // keybinds or cooldowns. The fourth chip is the car's live condition,
+  // refreshed by updateSpeedo (the car panel) each frame.
+  const crewEl = $('[data-hud="crew"]');
+  const CREW_NAMES = ['Mama Luz', 'Tito', 'Ivy'];
+  if (crewEl) {
+    let html = '';
+    for (const name of CREW_NAMES) {
+      const c = CHARACTERS.find((x) => x.name === name);
+      html += `<div class="crew-chip">
+        <img class="crew-img" src="${drawPortrait(name)}" alt="">
+        <span class="crew-txt">
+          <span class="crew-name">${name.toUpperCase()}</span>
+          <span class="crew-role">${c ? c.role : ''}</span>
+        </span>
+      </div>`;
+    }
+    html += `<div class="crew-chip crew-cond">
+      <span class="crew-txt">
+        <span class="crew-name" data-hud="crew-car">ON FOOT</span>
+        <span class="crew-role">CONDITION <span data-hud="crew-cond-pct">0%</span></span>
+        <span class="bar cond crew-bar"><span class="fill" data-hud="crew-cond-fill"></span></span>
+      </span>
+    </div>`;
+    crewEl.innerHTML = html;
+  }
+  const crewCar = $('[data-hud="crew-car"]');
+  const crewCondPct = $('[data-hud="crew-cond-pct"]');
+  const crewCondFill = $('[data-hud="crew-cond-fill"]');
 
   // --hud-draw-- marker: minimap drawing helpers append below
 
@@ -313,7 +350,10 @@ export function createHud(state, dom, opts = {}) {
   // --hud-panels-2-- marker: second half of the panels append below
 
   /** Bottom-right speedometer: big km/h, car name, condition/nitro/fuel bars,
-   *  or an ON FOOT readout with the current weapon. */
+   *  or an ON FOOT readout with the current weapon. Also refreshes the crew
+   *  row's car-condition chip: that chip is car-derived, and this panel owns
+   *  the car readout (update()'s body is frozen by the P9 ghosting contract,
+   *  so the refresh rides here instead of adding a call there). */
   function updateSpeedo() {
     if (state.inCar && state.currentCar) {
       const car = state.currentCar;
@@ -323,6 +363,9 @@ export function createHud(state, dom, opts = {}) {
       if (nitroFill) nitroFill.style.width = Math.max(0, Math.min(100, car.nitro)) + '%';
       if (fuelFill) fuelFill.style.width = Math.max(0, Math.min(100, car.fuel)) + '%';
       if (onFootEl) onFootEl.style.display = 'none';
+      if (crewCar) crewCar.textContent = car.name.toUpperCase();
+      if (crewCondPct) crewCondPct.textContent = Math.round(Math.max(0, Math.min(100, car.condition))) + '%';
+      if (crewCondFill) crewCondFill.style.width = Math.max(0, Math.min(100, car.condition)) + '%';
     } else {
       if (speedoKmh) speedoKmh.textContent = '0';
       if (carName) carName.textContent = 'ON FOOT';
@@ -334,6 +377,9 @@ export function createHud(state, dom, opts = {}) {
         onFootEl.style.display = 'block';
         onFootEl.textContent = w;
       }
+      if (crewCar) crewCar.textContent = 'ON FOOT';
+      if (crewCondPct) crewCondPct.textContent = '—';
+      if (crewCondFill) crewCondFill.style.width = '0%';
     }
   }
 
@@ -390,20 +436,28 @@ export function createHud(state, dom, opts = {}) {
     radioTrack.textContent = tr;
   }
 
-  /** Centre-right score popups: drift, near miss, shell, mission payout. */
+  /** Centre-right score popups: drift, near miss, shell, mission payout.
+   *  Reconciled IN PLACE: rebuilding innerHTML every frame restarted each
+   *  popup's rise animation at its opacity-0 first keyframe, so popups never
+   *  actually painted. Existing nodes keep their animation; only text and
+   *  the fade class are touched, and nodes are added/removed as the list
+   *  changes. */
   function updatePopups() {
     if (!popupsEl) return;
     if (!state.popups) state.popups = [];
-    if (!state.popups.length) {
-      if (popupsEl.children.length) popupsEl.innerHTML = '';
-      return;
+    const list = state.popups;
+    while (popupsEl.children.length > list.length) popupsEl.removeChild(popupsEl.lastChild);
+    for (let i = 0; i < list.length; i += 1) {
+      const p = list[i];
+      let el = popupsEl.children[i];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'popup';
+        popupsEl.appendChild(el);
+      }
+      if (el.textContent !== p.text) el.textContent = p.text;
+      el.classList.toggle('pop-fade', p.t < 0.8);
     }
-    let html = '';
-    for (const p of state.popups) {
-      const fade = p.t < 0.8 ? ' pop-fade' : '';
-      html += `<div class="popup${fade}">${p.text}</div>`;
-    }
-    popupsEl.innerHTML = html;
   }
 
   // --hud-panels-3-- marker: all panels defined

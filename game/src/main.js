@@ -635,8 +635,10 @@ function boot() {
     if (screen === 'menu') menuCamera(frameTime);
     update(STEP, state.clockMinutes);
     hud.update(STEP);
-    // Drain popups so they disappear after their lifetime.
-    if (state.popups.length) {
+    // Drain popups so they disappear after their lifetime. A staged capture
+    // (?shot=) holds them like it holds the sim: stepping the drain would
+    // expire the cover's DRIFT payout before the screenshot lands.
+    if (!shotSnap && state.popups.length) {
       state.popups = state.popups.filter((p) => { p.t -= STEP; return p.t > 0; });
     }
   }
@@ -835,6 +837,8 @@ function boot() {
       state, city, driver, onFoot, arsenal, enemies, wanted, police, combat,
       mission, sideJobs, input, scene, camera, spawn, traffic, hud,
       crosshair: crosshairEl, parked, CARS, MISSIONS: missionCatalog,
+      // Live conch handles for staging-only consistency tweaks (stageMap).
+      shells,
       setScreen, ensureRadio, applySettings,
       stepWorld: step, update,
     };
