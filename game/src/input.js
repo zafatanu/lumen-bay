@@ -8,7 +8,8 @@
 //   set (consumeAny), so they have no held-state field here. Q is the horn
 //   (P3 audio): also one-shot — snapshot() reports it once as `honk` and
 //   consumes the press, so driving.js honks exactly once per key tap.
-//   `jump` is the held Space field — driving.js reads it as nitro.
+//   `jump` is the held Space field — on foot it jumps (see onfoot.js), and
+//   in a car driving.js reads it as nitro.
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),

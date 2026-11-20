@@ -188,6 +188,14 @@ export function createOnFoot(state, city, scene) {
   let gun = null;
   let gunFor = null;
   const GUN_AT = { x: 0.42, y: 1.05, z: 0.22 };
+  // --- On-foot jump (Space). Flat ground at y=0: Rook gets an initial up
+  // velocity, gravity brings him back, and landing snaps him grounded. The
+  // clamp in setPosition() keeps a teleport from landing mid-air.
+  const JUMP_V = 6;
+  const GRAVITY = 20;
+  let vy = 0;
+  let grounded = true;
+  let prevJump = false;   // rising-edge detection: input.jump is HELD
 
   // --- Visual-only character feel (mesh transforms, never movement or
   // collision): the body eases to its heading, banks into turns, leans into
@@ -226,6 +234,8 @@ export function createOnFoot(state, city, scene) {
 
   function setPosition(p, h) {
     pos.copy(p); pos.y = 0;
+    // A teleport lands grounded, never mid-air.
+    vy = 0; grounded = true; prevJump = false;
     heading = h !== undefined ? h : heading;
     mesh.position.copy(pos);
     // Sync the visual layer so a teleport doesn't spin or replay old hits.
@@ -283,6 +293,17 @@ export function createOnFoot(state, city, scene) {
       d = Math.atan2(Math.sin(d), Math.cos(d));
       heading += d * Math.min(1, dt * 12);
     }
+    // --- On-foot jump (Space): rising-edge on the held jump field, then
+    // gravity pulls Rook back down. Ground is flat (y=0) so landing snaps.
+    if (input.jump && !prevJump && grounded) {
+      vy = JUMP_V;
+      grounded = false;
+    }
+    if (!grounded) {
+      vy -= GRAVITY * dt;
+      pos.y += vy * dt;
+      if (pos.y <= 0) { pos.y = 0; vy = 0; grounded = true; }
+    }
     const speed = input.sprint ? PLAYER.run : PLAYER.walk;
     pos.x += mx * speed * dt;
     pos.z += mz * speed * dt;
@@ -335,6 +356,7 @@ export function createOnFoot(state, city, scene) {
     const gaitT = moveSpeed > 0.01 ? 1 : 0;
     walkAmp += (gaitT - walkAmp) * Math.min(1, vdt * 8);
     swingWalk(mesh.userData.limbs, walkPhase, walkAmp);
+    prevJump = input.jump;
   }
 
   return { mesh, update, setWeapon, setPosition, getPosition, hide, show, get heading() { return heading; } };
