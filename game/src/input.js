@@ -10,6 +10,11 @@
 //   consumes the press, so driving.js honks exactly once per key tap.
 //   `jump` is the held Space field — on foot it jumps (see onfoot.js), and
 //   in a car driving.js reads it as nitro.
+//
+// Mouse: the canvas click locks the pointer (mouse-look, see main.js). While
+// locked, left button fires and right held aims over the shoulder — exactly the
+// bindings CONTROLS lists. Unlocked, left click still fires and right held still
+// aims (a plain mouse works without the lock); the lock only adds camera orbit.
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),
@@ -28,8 +33,15 @@ export function createInput() {
     recover: false,
   };
   const pressed = new Set();
-  const mouse = { x: 0, y: 0, down: false, click: false };
+  const mouse = { x: 0, y: 0, down: false, click: false, aim: false };
   let weapon = 1;
+  // Mouse-look: pointer deltas that piled up since the last snapshot(). While
+  // the pointer is locked, main.js drains them into the orbit and drops the
+  // absolute position; a plain click (the gun) is edge-detected per call so
+  // the click that HIDES the hint never also fires a round.
+  let lookX = 0;
+  let lookY = 0;
+  let clickSeen = false;
 
   function onKeyDown(event) {
     const code = event.code;
@@ -70,12 +82,40 @@ export function createInput() {
   function onPointerDown(event) {
     mouse.x = event.clientX;
     mouse.y = event.clientY;
+    // Right / middle just aim: they must not queue a shot or hide a hint the
+    // way a left press is allowed to.
+    if (event.button === 2 || event.button === 1) { mouse.aim = true; return; }
+    if (event.button !== undefined && event.button !== 0) return;
     mouse.down = true;
     mouse.click = true;
+    clickSeen = true;
   }
 
-  function onPointerUp() {
-    mouse.down = false;
+  function onPointerUp(event) {
+    if (event.button === undefined || event.button === 2 || event.button === 1) mouse.aim = false;
+    if (event.button === undefined || event.button === 0) mouse.down = false;
+  }
+
+  function onContextMenu(event) {
+    // Right button aims; the browser menu would eat the hold. Never over a
+    // menu button (right-drag is a voluntary cancel there), only over play.
+    if (!event.target || !event.target.closest || !event.target.closest('button')) event.preventDefault();
+  }
+
+  // getCoalescedEvents() hands back every mousemove sampled since the last
+  // rAF, not just the newest one, so a fast flick orbits by its full travel
+  // instead of the last few pixels.
+  function onMouseMove(event) {
+    let dx = event.movementX || 0;
+    let dy = event.movementY || 0;
+    if (!dx && !dy && typeof event.getCoalescedEvents === 'function') {
+      for (const e of event.getCoalescedEvents()) {
+        dx += e.movementX || 0;
+        dy += e.movementY || 0;
+      }
+    }
+    lookX += dx;
+    lookY += dy;
   }
 
   window.addEventListener('keydown', onKeyDown);
@@ -83,6 +123,8 @@ export function createInput() {
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('contextmenu', onContextMenu);
 
   // On window blur (switching tabs, clicking out) release every held key so a
   // stale "up" can't leave Rook driving into a wall or firing unattended.
@@ -91,6 +133,9 @@ export function createInput() {
     keys.sprint = keys.handbrake = keys.jump = false;
     keys.recover = false;
     mouse.down = false;
+    mouse.aim = false;
+    lookX = 0;
+    lookY = 0;
   });
 
   return {
@@ -105,6 +150,7 @@ export function createInput() {
         sprint: keys.sprint, handbrake: keys.handbrake, jump: keys.jump,
         recover: keys.recover, weapon, honk,
         mouseX: mouse.x, mouseY: mouse.y, mouseDown: mouse.down,
+        mouseAim: mouse.aim,
       };
     },
     pressed(code) {
@@ -126,6 +172,23 @@ export function createInput() {
       const c = mouse.click;
       mouse.click = false;
       return c;
+    },
+    /** Take the mouse-look travel since the last call and zero it. main.js
+     *  drains it once per rendered frame (after the fixed steps). */
+    look() {
+      const d = { x: lookX, y: lookY };
+      lookX = 0;
+      lookY = 0;
+      return d;
+    },
+    /** A press-edge eat: under pointer lock every mousedown IS a shot, so
+     *  combat uses this for the gun — the press that hid the "click to look"
+     *  hint is already spent by then via the click() tap in combat.update.
+     *  click() keeps its "may be consumed twice" shape. */
+    clickPressed() {
+      if (!clickSeen) return false;
+      clickSeen = false;
+      return true;
     },
     clear() {
       pressed.clear();

@@ -196,10 +196,15 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
 
   let aimYaw = 0;
   let aimPitch = 0;
+  let bring = 0;     // eased over-shoulder raise, 1 while the right button aims
   let armSwing = 0;
   let hurtFlash = 0;
   let meleeLast = 0;
   let wobble = 0;
+  // Hit marker: a short ✓/✕ over the crosshair when a round lands on flesh.
+  // `hitKill` picks the red kill tick; it decays on the real frame clock.
+  let hitMarker = 0;
+  let hitKill = false;
 
   function playerPoint() {
     const p = playerPos.getPosition();
@@ -212,6 +217,19 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     const p = playerPoint();
     p.y = MUZZLE_Y;
     return p;
+  }
+
+  /** The centre-screen ray a real round now follows: out of the chest at aim
+   *  yaw and pitch. Crosshair, hit test bytes AND shot all ride this line,
+   *  so a round lands exactly where the reticle sits (WYSIWYG aim). */
+  function centreRay(cameraIn) {
+    const pnow = playerPoint();
+    const dx = -Math.sin(aimYaw);
+    const dy = Math.tan(aimPitch);
+    const dz = -Math.cos(aimYaw);
+    const inv = 1 / Math.sqrt(dx * dx + dy * dy + dz * dz);
+    ray.set(new THREE.Vector3(pnow.x, MUZZLE_Y, pnow.z), new THREE.Vector3(dx * inv, dy * inv, dz * inv));
+    return ray.ray;
   }
 
   /** Add a tracer from `from` toward `to`; it burns out in a beat. */
@@ -248,25 +266,25 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     }
   }
 
-  /** Aim heading: camera forward when nothing is under the pointer; otherwise
-   *  the direction from Rook to the ground spot the pointer is over. Hip-fire
-   *  aim, so it snaps between headings rather than tracking a crosshair in 2D. */
-  function aimHeading(cameraIn, mouseX, mouseY) {
+  /** Aim heading from the mouse-look orbit the follow camera shares (main.js).
+   *  On foot the muscle memory is never flipped: the game eases the orbit round
+   *  to `aimYaw + PI` every frame, so the crosshair still points exactly down
+   *  the camera. Over the shoulder (`aimPitch`, right button held) the aim
+   *  climbs with the camera for up or down street shots, clamped to a
+   *  readable pitch. Nothing under the pointer: camera forward (fallback).
+   *  `opts` = { lookYaw, lookPitch, over, locked } from main.js. */
+  function aimHeading(cameraIn, opts) {
     cameraIn.getWorldDirection(fwd);
     const fallback = Math.atan2(fwd.x, fwd.z);
-    if (mouseX === undefined || mouseY === undefined) return fallback;
-    tmpNdc.set((mouseX / window.innerWidth) * 2 - 1, -(mouseY / window.innerHeight) * 2 + 1);
-    ray.setFromCamera(tmpNdc, cameraIn);
-    const o = ray.ray.origin;
-    const d = ray.ray.direction;
-    if (d.y > -1e-4) return fallback;
-    const t = -0.6 / d.y;
-    if (t < 0) return fallback;
-    const p = playerPoint();
-    const hx = o.x + d.x * t;
-    const hz = o.z + d.z * t;
-    if (Math.hypot(hx - p.x, hz - p.z) < 2) return fallback;
-    return Math.atan2(hx - p.x, hz - p.z);
+    if (!opts || typeof opts.lookYaw !== 'number') return fallback;
+    let yaw = opts.lookYaw;
+    // Locked pointer: nothing moves the look but the mouse, so fold in the
+    // neck turn from WASD as well (the camera aim is the same in both cases).
+    if (opts.locked && typeof opts.neckYaw === 'number') yaw += opts.neckYaw * 0.5;
+    aimPitch = opts.over
+      ? Math.max(-0.95, Math.min(0.95, (opts.lookPitch || 0) - 0.16))
+      : 0;
+    return yaw + Math.PI;
   }
 
   /** Muzzle world position: chest height, a hand's width to Rook's right
@@ -324,17 +342,18 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     }
   }
 
-  /** Fire one round from the gun along the camera-through-crosshair ray. */
+  /** Fire one round from the gun along the centre-screen aim ray. */
   function fireRanged(shot, camera, mouseX, mouseY) {
     const muzzle = muzzlePoint();
-    tmpNdc.set((mouseX / window.innerWidth) * 2 - 1, -(mouseY / window.innerHeight) * 2 + 1);
-    ray.setFromCamera(tmpNdc, camera);
-    const dir = ray.ray.direction;
+    const origin = new THREE.Vector3(playerPoint().x, MUZZLE_Y, playerPoint().z);
+    ray.set(origin, centreRay(camera).direction.clone());
     const sp = shot.spread;
+    const dir = ray.ray.direction;
     dir.x += (Math.random() - 0.5) * sp * 2;
     dir.y += (Math.random() - 0.5) * sp * 2;
     dir.z += (Math.random() - 0.5) * sp * 2;
     dir.normalize();
+    ray.ray.direction.copy(dir);   // aimHeading/fireRanged agree: shot == reticle
     if (shot.muzzle) flashes.muzzle(muzzle, 1.2 + shot.knock * 2);
     // Per-weapon report: shotgun thumps lower, SMG stays light (sfx.js).
     sfx.play('gunshot', { weapon: shot.weapon.id });
@@ -361,7 +380,9 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
         const dmg = shot.damage;
         enemies.damage(owner.enemy, dmg, pt.clone());
         flashes.impact(pt);
-        addTracer(muzzle, pt.clone());
+        addTracer(muzzle, pt.clone(), 'flesh');
+        hitMarker = 0.20;
+        hitKill = !!owner.enemy.alive === false;
         if (onKill) onKill(owner.enemy, h.distance);
       } else if (owner && owner.ped) {
         if (wanted) wanted.addHeat(14, 'pedestrian');
@@ -393,8 +414,11 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
   }
 
   /** Advance a fixed step of the fight: weapons, flashes, firing, enemy shots,
-   *  reload and crosshair. `input` is the shared input controller. */
-  function update(dt, input, camera, snapOverride) {
+   *  reload and crosshair. `input` is the shared input controller.
+   *  `opts` = { lookYaw, lookPitch, over, locked, neckYaw } from main.js: the
+   *  mouse-look orbit the camera and the centre-screen aim share. Omitted by
+   *  every staged capture, which keeps the pre-look aiming exactly. */
+  function update(dt, input, camera, snapOverride, opts) {
     arsenal.update(dt);
     flashes.update(dt);
     for (const tr of tracers) {
@@ -409,7 +433,9 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     const wantIdx = snap.weapon - 1;
     if (arsenal.index !== snap.weapon) arsenal.select(wantIdx);
     const cur = arsenal.current;
+    const held = cur && !cur.melee;
     const onFootFire = !state.inCar && !state.down;
+    bring += ((held && snap.mouseAim) ? 1 - bring : -bring) * Math.min(1, dt * 12);
 
     aimYaw = aimHeading(camera, snap.mouseX, snap.mouseY);
     if (crosshair) {
