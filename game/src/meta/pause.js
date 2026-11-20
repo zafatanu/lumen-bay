@@ -1,4 +1,4 @@
-// LUMEN BAY pause screen (Esc): PAUSED title, RESUME / RESTART MISSION /
+// GENERATIONAL AUTO pause screen (Esc): PAUSED title, RESUME / RESTART MISSION /
 // SETTINGS / QUIT TO MENU buttons, plus a current-objective recap + stats.
 import { MISSIONS } from '../missions/catalog.js';
 import * as sfx from '../audio/sfx.js';

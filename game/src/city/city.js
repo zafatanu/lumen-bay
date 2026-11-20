@@ -2,7 +2,7 @@
 // a coastal boardwalk, beach and ocean, palms, street props, and a marina
 // ferris wheel. Everything is built procedurally from a seeded rng.
 import * as THREE from 'three';
-import { WORLD, COAST, SEA, DISTRICTS, SPAWN, SUNSET } from '../config.js';
+import { WORLD, COAST, SEA, DISTRICTS, SPAWN, SUNSET, STREET } from '../config.js';
 import { makeFacadeTexture, registerAmbient } from '../render/scene.js';
 import { rand, randInt, pick } from '../random.js';
 import { snapToRoad } from '../missions/catalog.js';
@@ -140,10 +140,13 @@ function buildGround(group) {
   ctx.fillStyle = '#9aa479';
   ctx.fillRect(0, 0, px, px);
 
-  // Paint road lanes (both axes) across the whole grid.
+  // Paint road lanes (both axes) across the whole grid. The drawn asphalt
+  // is STREET.roadPaintScale of the full collision road (audit P0 scale):
+  // the grid/traffic/spawn math keeps WORLD.road, this only narrows what is
+  // painted so cars/lamps read at human scale on the streets.
   ctx.fillStyle = '#3a3f46';
   const step = WORLD.block + WORLD.road;
-  const roadPx = (WORLD.road / size) * px;
+  const roadPx = (WORLD.road / size) * px * (STREET.roadPaintScale || 1);
   for (let i = 1; i < WORLD.blocks; i += 1) {
     const at = (i * step / size) * px;
     ctx.fillRect(at - roadPx / 2, 0, roadPx, px);
@@ -895,7 +898,11 @@ function buildBoulevardProps(group, rng) {
       cabin.scale.set(1.7, 0.6, 2.2);
       cabin.position.set(0, 1.2, -0.2);
       car.add(cabin);
-      car.position.set(roadX - WORLD.road / 2 + 1.6, 0, z + rand(rng, -2, 2));
+      // Sit the parked car on the (now narrowed) painted asphalt kerb: outer
+      // edge just inside the drawn road edge, so it reads as a parked car at
+      // human scale against the drivable lane, not out on the gutter.
+      const parkKerb = (WORLD.road / 2) * STREET.roadPaintScale - STREET.parkedCarKerbIn;
+      car.position.set(roadX - parkKerb, 0, z + rand(rng, -2, 2));
       car.rotation.y = (rng() < 0.5 ? 0 : Math.PI) + rand(rng, -0.06, 0.06);
       group.add(car);
     }

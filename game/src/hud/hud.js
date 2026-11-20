@@ -1,4 +1,4 @@
-// LUMEN BAY dense HUD: mission, police, minimap, wanted, speedo, dialogue,
+// GENERATIONAL AUTO dense HUD: mission, police, minimap, wanted, speedo, dialogue,
 // weapons, radio widget and score popups. Reads shared `state` every frame
 // and writes plain DOM + canvas; positions come from config so the 1280x800
 // layout stays legible. Nothing here is clickable — the HUD is read-only,
@@ -296,7 +296,7 @@ export function createHud(state, dom, opts = {}) {
       policeList.innerHTML = '<div class="pl-clear">CLEAR \u2014 no heat</div>';
       return;
     }
-    let html = '<div class="pl-title">LUMEN BAY PD</div>';
+    let html = '<div class="pl-title">BAY PD</div>';
     for (const u of feed) {
       const stateCls = (u.state || 'EN ROUTE').toLowerCase().replace(/\s+/g, '-');
       html += `<div class="pl-row">

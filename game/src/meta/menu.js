@@ -1,4 +1,4 @@
-// LUMEN BAY title menu: big logo, tagline, judge line, buttons (CONTINUE /
+// GENERATIONAL AUTO title menu: big logo, tagline, judge line, buttons (CONTINUE /
 // NEW GAME / CONTROLS / SETTINGS / HOW TO PLAY) and the character roster.
 // Buttons are real DOM <button>s AND keyboard navigable (Enter/Space).
 import { CHARACTERS } from '../missions/catalog.js';
@@ -104,7 +104,7 @@ export function createMenu(state, callbacks = {}) {
 
   dom.innerHTML = `
     <div class="menu-panel">
-      <div class="menu-logo">LUMEN <span>BAY</span></div>
+      <div class="menu-logo">GENERATIONAL <span>AUTO</span></div>
       <div class="menu-tag">A sun-soaked island crime story</div>
       <div class="menu-judge">8 story missions \u00b7 traffic \u00b7 police chases \u00b7 radio \u00b7 saves</div>
       <div class="menu-judge">WASD moves Rook once in game \u2014 here use arrows + Enter, choose NEW GAME</div>

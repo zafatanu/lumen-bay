@@ -111,7 +111,7 @@ function makeFlashes(parent) {
       const l = nextLight();
       l.t = 0.10;
       l.light.position.copy(pos);
-      l.light.intensity = 9;
+      l.light.intensity = 2.5;   // audit P0: was 9, which blew Rook white at the muzzle
       l.light.color.setHex(0xffc070);
       l.light.visible = true;
       const sp = nextSprite();
@@ -128,7 +128,7 @@ function makeFlashes(parent) {
       const l = nextLight();
       l.t = 0.05;
       l.light.position.copy(pos);
-      l.light.intensity = 5;
+      l.light.intensity = 1.5;   // audit P0: was 5, same white-blow-out as the muzzle
       l.light.color.setHex(0xff9a50);
       l.light.visible = true;
       const sp = nextSprite();

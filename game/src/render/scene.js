@@ -20,9 +20,9 @@ const GOLDEN = {
   sunIntensity: 2.6,
   hemiSky: 0xbdd7f0,    // cool pale-blue sky fill
   hemiGround: 0xe8c39a, // warm sand bounce off the streets
-  hemiIntensity: 1.25,
+  hemiIntensity: 1.55,
   fill: 0xa9c6e8,       // cool pale-blue bounce on the shadowed facades
-  fillIntensity: 0.9,
+  fillIntensity: 1.1,
 };
 
 /** Darken a '#rrggbb' colour by factor f (0..1) for painted trim/shadows. */
@@ -155,8 +155,14 @@ export function createRenderer3D(canvas) {
   // but the island (578m) stays fully readable — no fog-out.
   scene.fog = new THREE.Fog(GOLDEN.fog, GOLDEN.fogNear, GOLDEN.fogFar);
 
-  const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.5, 1600544);
-  camera.position.set(0, 40, 90);
+  // Boot lens: audit P0 picks ~55 for a readable street at the new follow
+  // distance; the follow/chase cameras ease to their own target from here.
+  const camera = new THREE.PerspectiveCamera(55, canvas.clientWidth / canvas.clientHeight, 0.5, 1600544);
+  // This boot FOV is only a pre-menu default: the on-foot follow camera
+  // (onfoot.js) and the chase camera (driving.js) ease to their own FOV each
+  // frame, so gameplay always renders at the audit-chosen lens. The boot
+  // overview just needs to not be the old wide 60.
+  camera.position.set(0, 40, 46);
   camera.lookAt(0, 0, 0);
 
   // --- Golden-hour sky dome: big sphere with a vertex-colour gradient. ---

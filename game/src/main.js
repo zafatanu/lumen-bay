@@ -1,4 +1,4 @@
-// LUMEN BAY — main bootstrap: fixed-step loop, screens, on-foot player,
+// GENERATIONAL AUTO — main bootstrap: fixed-step loop, screens, on-foot player,
 // arcade driving, traffic + pedestrians, car stealing, clock advance, resize,
 // and the ?shot= staging hook.
 import * as THREE from 'three';
@@ -115,7 +115,7 @@ function boot() {
   let parked = null;
   {
     const mesh = buildCarMesh(bayRunner);
-    const p = new THREE.Vector3(spawn.x, 0, spawn.z + 4);
+    const p = new THREE.Vector3(spawn.x + 6, 0, spawn.z + 12);
     mesh.position.copy(p);
     scene.add(mesh);
     parked = { mesh, def: bayRunner, pos: p };
@@ -179,8 +179,8 @@ function boot() {
   const beacon = new THREE.Group();
   {
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.16, 16, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd19a, transparent: true, opacity: 0.5 })
+      new THREE.CylinderGeometry(0.06, 0.16, 22, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd19a, transparent: true, opacity: 0.75 })
     );
     pillar.position.y = 8;
     beacon.add(pillar);
@@ -375,13 +375,13 @@ function boot() {
     return missionCatalog[i + 1].id;
   }
 
-  /** Snap the follow camera directly behind Rook (same back=3.4 / up=3.1 /
+  /** Snap the follow camera directly behind Rook (same back=9.0 / up=2.5 /
    *  chest look as followCamera), so a new or continued run never lerps in
    *  from wherever the menu orbit left the camera. */
   function snapFollowCamera() {
     const p = onFoot.getPosition();
     const h = onFoot.heading;
-    camera.position.set(p.x - Math.sin(h) * 3.4, p.y + 3.1, p.z - Math.cos(h) * 3.4);
+    camera.position.set(p.x - Math.sin(h) * 9.0, p.y + 2.5, p.z - Math.cos(h) * 9.0);
     camera.userData.followLook = new THREE.Vector3(p.x, p.y + 1.0, p.z);
     camera.lookAt(p.x, p.y + 1.0, p.z);
     camera.fov = 55;
@@ -427,7 +427,11 @@ function boot() {
     } else {
       state.pushPopup('Ch.1 \u00b7 First Light');
     }
-    onFoot.setPosition(new THREE.Vector3(spawn.x, 0, spawn.z + 6), 0);
+    // Face Rook along the spawn→first-target vector (-120,-84) so the gold
+    // beacon is in frame at spawn: the camera looks along (sin h, cos h), so
+    // h = atan2(target.x - spawn.x, target.z - spawn.z).
+    const targetH = Math.atan2(-120 - spawn.x, -84 - spawn.z);
+    onFoot.setPosition(new THREE.Vector3(spawn.x, 0, spawn.z + 6), targetH);
     onFoot.show();
     snapFollowCamera();
     state.inCar = false;
@@ -694,7 +698,7 @@ function boot() {
     state.currentCar = null;
     state.speedKmh = 0;
     // Snap the chase FOV back to the on-foot baseline so the view isn't wide.
-    camera.fov = 60;
+    camera.fov = 55;
     camera.updateProjectionMatrix();
   }
 

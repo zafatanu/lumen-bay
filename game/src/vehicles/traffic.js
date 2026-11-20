@@ -3,7 +3,7 @@
 // The traffic layer stays lightweight: a fixed pool of cars is recycled, so
 // a crowded boulevard never allocates new meshes during a chase.
 import * as THREE from 'three';
-import { WORLD } from '../config.js';
+import { WORLD, SPAWN } from '../config.js';
 import { CARS, buildCarMesh } from './cars.js';
 import { pick, rand } from '../random.js';
 
@@ -269,6 +269,49 @@ export function createTraffic(scene, city, rng) {
     initPedestrian(ped, rng);
     scene.add(mesh);
     peds.push(ped);
+  }
+
+  // NEW GAME living spawn: pin 2 traffic cars + 2 pedestrians deterministically
+  // to the Coral Beach boulevard (road x = SPAWN.x = roadLine(2)) so the spawn
+  // street is never empty, while Rook's east-facing lane ahead stays clear.
+  // Same pool/fields as the random traffic; just placed near spawn, not scattered.
+  const spawnRoad = SPAWN.x;
+  for (let i = 0; i < 2 && i < cars.length; i += 1) {
+    const c = cars[i];
+    const south = i === 0; // one car heads north, one south, along the boulevard
+    c.axis = 'z';
+    c.dir = south ? -1 : 1;
+    c.roadVal = spawnRoad;
+    c.laneOff = south ? -3 : 3;
+    c.pos.set(spawnRoad + c.laneOff, 0, south ? SPAWN.z + 22 : SPAWN.z - 18);
+    c.heading = headingFor('z', c.dir);
+    c.cruise = rand(rng, 8, 11);
+    c.speed = c.cruise;
+    c.gap = rand(rng, 10, 16);
+    c.turnTimer = rand(rng, 8, 16);
+    c.mesh.position.copy(c.pos);
+    c.mesh.rotation.y = c.heading;
+  }
+  for (let i = 0; i < 2 && i < peds.length; i += 1) {
+    const ped = peds[i];
+    const east = i === 0; // one pedestrian on each sidewalk of the boulevard
+    ped.axis = 'z';
+    ped.dir = 1;
+    ped.roadVal = spawnRoad;
+    ped.side = (east ? 1 : -1) * (HALF + 3);
+    ped.pos.set(spawnRoad + ped.side, 0, SPAWN.z + (east ? -14 : 18));
+    ped.heading = headingFor('z', ped.dir);
+    ped.walkSpeed = rand(rng, 1.1, 1.6);
+    ped.speed = ped.walkSpeed;
+    ped.cadence = rand(rng, 5, 8);
+    ped.swing = rand(rng, 0.4, 0.55);
+    ped.phase = rand(rng, 0, Math.PI * 2);
+    ped.look = rand(rng, 0, 6);
+    ped.pause = 0;
+    ped.crossTimer = rand(rng, 8, 16);
+    ped.flee = 0;
+    ped.mesh.position.copy(ped.pos);
+    ped.mesh.rotation.y = ped.heading;
   }
 
   function update(dt, playerPos, playerSpeedKmh) {

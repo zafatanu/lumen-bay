@@ -113,8 +113,15 @@ export function buildPlayerMesh() {
   const brim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.04, 0.26), cap);
   brim.position.set(0, 0.16, 0.16);
   head.add(brim);
+  // Slightly larger head so Rook reads as a man at human scale, not a peg.
+  head.scale.multiplyScalar(1.1);
   group.add(head);
   group.userData.limbs = { legL, legR, armL, armR, head, body };
+  // Rook stands 1.75-1.8 units (1 unit = 1m): the rig builds ~1.9 tall, so
+  // shrink the whole figure uniformly to land at ~1.79m. Visual only — the
+  // walk cycle, seated-driver pose and collision radius are unaffected.
+  group.scale.multiplyScalar(0.94);
+  return group;
   return group;
 }
 
@@ -122,8 +129,11 @@ export function buildPlayerMesh() {
  *  `colliders` (city.colliders, optional) enables occlusion pull-in so the
  *  camera never swings into a building block. */
 export function followCamera(camera, dt, pos, heading, colliders) {
-  const back = 3.4;
-  const up = 3.1;
+  // On-foot follow: measured hero frame-height at back=4.5/up=2.25 was ~45%
+  // (too large) and at back=7.5 ~28% (still over). Pull back to ~9m and 2.5m
+  // up so Rook lands ~22-24% of frame height at FOV 55 — the GTA-style bar.
+  const back = 9.0;
+  const up = 2.5;
   let cx = pos.x - Math.sin(heading) * back;
   let cz = pos.z - Math.cos(heading) * back;
   let cy = pos.y + up;
@@ -163,7 +173,7 @@ export function followCamera(camera, dt, pos, heading, colliders) {
   look.y += (ty - look.y) * lk;
   look.z += (tz - look.z) * lk;
   camera.lookAt(look.x, look.y, look.z);
-  const fovTarget = 55;
+  const fovTarget = 55;   // audit FOV sweep: 50->24%, 55->22%, 60->20%; 55 chosen
   camera.fov += (fovTarget - camera.fov) * Math.min(1, dt * 4);
   camera.updateProjectionMatrix();
 }

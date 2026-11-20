@@ -2,7 +2,7 @@
 // game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
 // modules, three.js vendored under game/vendor, no network request), and the program hands it in.
 // It copies game/ and screenshots/ from beside this file to /output and writes /output/dossier.json,
-// the summary the judge reads, with the vendored make.fun library. LUMEN BAY is an original,
+// the summary the judge reads, with the vendored make.fun library. GENERATIONAL AUTO is an original,
 // sun-soaked island crime game built in Three.js: 8 story missions across 5 districts, traffic and
 // pedestrians, wanted/police chases with a spotter helicopter, on-foot combat, a synth radio and
 // browser autosaves. Put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is
@@ -24,7 +24,7 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 // build entry describes the game it actually hands in, and the same string
 // can be surfaced to the judge's server log on submission.
 const GAME_SUMMARY =
-  'LUMEN BAY: open-world island crime game \u2014 8 story missions, 5 districts, ' +
+  'GENERATIONAL AUTO: open-world island crime game \u2014 8 story missions, 5 districts, ' +
   'traffic + pedestrians, wanted/police chases with helicopter, on-foot combat, ' +
   'synth radio, saves, full map.';
 console.log(`[main.ts] bundling ${GAME_SUMMARY}`);

@@ -220,10 +220,11 @@
 }
 
 /* --hud-css-radio-- marker: radio widget */
-/* Centre-right: score popups — drift, near miss, shell, payout. They sit just
-   left of the speedo so a drift bonus does not hide the km/h readout. */
+/* Right column below the radio widget: score popups — drift, near miss, shell,
+   payout. Moved to top 200px so long lines clear the radio (ends ~y160) and
+   sit above the weapon slots (start ~y586 at 800px height). */
 #hud .hud-popups {
-  position: absolute; top: 96px; right: 150px; text-align: right;
+  position: absolute; top: 200px; right: 12px; text-align: right;
   pointer-events: none;
 }
 #hud .popup {

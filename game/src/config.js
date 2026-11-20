@@ -1,4 +1,4 @@
-// LUMEN BAY — all tuning numbers and colours in one place.
+// GENERATIONAL AUTO — all tuning numbers and colours in one place.
 // The city is a fixed 8x8 block grid; the renderer scales to the window.
 
 /** The simulation's fixed step, in seconds: 60 updates a second whatever the display rate. */
@@ -10,6 +10,18 @@ export const WORLD = {
   block: 60,
   road: 14,
   total: 8 * 60 + 7 * 14, // 578m across the whole island
+};
+
+/** Task 4 (audit P0 scale) street test: narrow the PAINTED asphalt ~30%
+ *  (visual only) so the streets read human-scale. The collision grid,
+ *  traffic lanes, spawn and mission targets all keep WORLD.road (14m) — this
+ *  only shrinks the drawn road so cars/lamps read at the right size. */
+export const STREET = {
+  roadPaintScale: 0.7,
+  // How far a parked car's outer edge sits inside the (narrowed) painted
+  // road edge, so the scale-reference cars stay ON the asphalt, not in the
+  // unpainted gutter. Purely visual placement — no colliders.
+  parkedCarKerbIn: 1.0,
 };
 
 /** Coastal boardwalk lies along the west (x-negative) edge. */

@@ -1,4 +1,4 @@
-// LUMEN BAY full-screen map: large canvas of the whole island with districts,
+// GENERATIONAL AUTO full-screen map: large canvas of the whole island with districts,
 // roads, beach, marina/ferris wheel, player marker, mission target, police
 // blips and shells; a side panel lists missions + career stats. M / Esc close.
 import { WORLD, DISTRICTS } from '../config.js';
@@ -368,7 +368,7 @@ export function createMap(state, player = () => ({ x: 0, z: 0 }), police = null,
     const stat = (k, v) => `<div class="mp-stat"><span class="mp-k">${k}</span><span class="mp-v">${v}</span></div>`;
 
     panel.innerHTML = `
-      <div class="mp-head">LUMEN BAY <span>MAP</span></div>
+      <div class="mp-head">GENERATIONAL AUTO <span>MAP</span></div>
       <div class="mp-sec">MISSIONS</div>
       <div class="mp-list">${list}</div>
       <div class="mp-sec">CAREER</div>

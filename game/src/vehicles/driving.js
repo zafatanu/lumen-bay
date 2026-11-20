@@ -344,7 +344,8 @@ export function createDriver(state, city, scene) {
     sfx.setEngine(speedKmh(), (input.up || input.down) ? 1 : 0, nitroOn);
   }
 
-  /** Chase camera: smooth follow behind the car; FOV widens with speed.
+  /** Chase camera: smooth follow ~7.5m behind and ~2.5m above the car
+   *  (audit P0 scale), FOV widens with speed so the street ahead reads.
    *  In hero mode (set only by the ?stage=chase / ?shot=1-chase staging) it
    *  swaps to the cover framing: low rear three-quarter, car large in the
    *  lower frame, tilted up so GULLWATCH and its beam stay in shot. Normal
@@ -378,8 +379,10 @@ export function createDriver(state, city, scene) {
       camera.updateProjectionMatrix();
       return;
     }
-    const back = 6.5 + speedKmh() * 0.05;
-    const up = 2.6 + speedKmh() * 0.02;
+    // Chase follow ~9m behind and ~2.5m above the car (audit P0 scale: the
+    // street ahead stays readable while the car holds ~20-25% of frame).
+    const back = 9.0 + speedKmh() * 0.05;
+    const up = 2.5 + speedKmh() * 0.02;
     let bx = pos.x - Math.sin(heading) * back;
     let bz = pos.z - Math.cos(heading) * back;
     let by = pos.y + up;
