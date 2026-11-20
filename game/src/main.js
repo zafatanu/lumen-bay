@@ -36,7 +36,7 @@ const rng = createRandom(seedParam ? seedFromString(seedParam) : SEED);
 
 function boot() {
   const canvas = document.getElementById('world3d');
-  const input = createInput();
+  const input = createInput(canvas);
   const state = createState();
   // The wanted controller records the last-seen position as a plain {x,z}
   // object, then updates it with .set() on the next sighting. Wrap the field
@@ -369,6 +369,36 @@ function boot() {
     state.shakeEnabled = s.shake !== false;
   }
 
+  // --- Mouse-look orbit (R3-8). Rook and the car steer with the keyboard; the
+  // camera is the mouse now. The orbit heading and hill pitch are eased here
+  // each display frame from the travel input.js piled up, so a flick swings the
+  // view instead of teleporting it.
+  const LOOK_PITCH_MIN = -0.8;
+  const LOOK_PITCH_MAX = 1.2;
+  // Radians of orbit per unit of pointer travel (input.js reports mousemove
+  // pixels): ~0.0045 swings ~0.26 rad per 60 px, a natural view for a flick.
+  const LOOK_RATE = 0.0045;
+  let lookSens = 1;
+  let lookInvert = 1;
+  let lookYaw = 0;
+  let lookYawLast = 0;
+  let lookPitch = 0;
+  // The look button is held with a gun up and the pointer locked: the crosshair
+  // is up, and onFoot keeps Rook's shoulders on the view while he stands.
+  let looking = false;
+
+  function readLookSettings() {
+    const s = state.settings || {};
+    lookSens = Number.isFinite(s.lookSens) ? Math.max(0.4, Math.min(2.6, s.lookSens)) : 1;
+    lookInvert = s.invertY ? -1 : 1;
+  }
+
+  function aimOpts(snapOverride, over) {
+    if (snapOverride) return null;
+    readLookSettings();
+    return { lookYaw, lookPitch, over: !!over, locked: input.locked() };
+  }
+
   /** Choose the next mission id after `id` in the catalog, or null at the end. */
   function nextMissionId(id) {
     const i = missionCatalog.findIndex((m) => m.id === id);
@@ -387,6 +417,23 @@ function boot() {
     camera.lookAt(p.x, p.y + 1.0, p.z);
     camera.fov = 55;
     camera.updateProjectionMatrix();
+    // A snap (new run / respawn) also starts the mouse-look orbit behind Rook.
+    lookYaw = h;
+    lookPitch = 0;
+  }
+
+  /** Put the camera on the mouse-look orbit round Rook: `back` metres behind
+   *  the view heading, up with the pitch. Its look point stays on Rook's chest
+   *  so a turn swings the whole shot. */
+  function placeLookCamera(cam, pos, back) {
+    const cp = Math.cos(lookPitch);
+    const sp = Math.sin(lookPitch);
+    cam.position.set(pos.x - Math.sin(lookYaw) * back * cp, pos.y + 2.5 + back * sp, pos.z - Math.cos(lookYaw) * back * cp);
+    if (!cam.userData.followLook) cam.userData.followLook = new THREE.Vector3(pos.x, pos.y + 1.0, pos.z);
+    cam.userData.followLook.set(pos.x, pos.y + 1.0, pos.z);
+    cam.lookAt(pos.x, pos.y + 1.0, pos.z);
+    cam.fov = 55;
+    cam.updateProjectionMatrix();
   }
 
   /** True when a persisted save exists; gates the first-run onboarding so it
@@ -551,6 +598,10 @@ function boot() {
     else if (next === 'play') { menuClose && menuClose(); menuClose = null; map.close(); pause.close(); }
     else if (next === 'paused') { pause.open(); map.close(); }
     else if (next === 'map') { map.open(); pause.close(); }
+    // The mouse belongs to the overlay that just took the screen: release the
+    // look lock there, and hide the OS cursor again over the view in play.
+    if (next !== 'play' && input.locked()) document.exitPointerLock();
+    setCursorMode(next === 'play' ? (input.locked() ? 'cross' : 'hidden') : 'default');
   }
 
   /** Rebuild the menu DOM each time we return to it, so CONTINUE reflects the
@@ -559,6 +610,32 @@ function boot() {
     menuClose && menuClose();
     menuClose = createMenu(state, menuCallbacks());
   }
+  /** Click the view to take the mouse. The click that takes the lock is spent
+   *  by input.js's armed round, so it never fires a shot at the centre. */
+  /** Swap the OS cursor style for the active screen: hidden over the view in
+   *  play with no lock (the crosshair is the pointer), a crosshair under the
+   *  lock, and the normal arrow wherever an overlay owns the mouse. */
+  function setCursorMode(mode) {
+    canvas.style.cursor = mode === 'hidden' ? 'none' : mode === 'cross' ? 'crosshair' : 'default';
+  }
+
+  function onLockChange() {
+    const locked = input.locked();
+    setCursorMode(screen === 'play' ? (locked ? 'cross' : 'hidden') : 'default');
+    if (!locked) input.armPress();
+  }
+
+  document.addEventListener('pointerlockchange', onLockChange);
+
+  function onCanvasClick() {
+    if (screen !== 'play' || input.locked()) return;
+    try {
+      const p = canvas.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch { /* pointer lock declining is a non-event */ }
+  }
+  canvas.addEventListener('click', onCanvasClick);
+
   function menuCallbacks() {
     return {
       onContinue: () => { ensureRadio(); continueGame(); setScreen('play'); },
@@ -610,6 +687,31 @@ function boot() {
     input.consumeAny(['Enter', 'Space', 'Escape', 'KeyM', 'KeyN']);
   }
 
+  /** Mouse-look, once per display frame. Quiet off the play screen (every
+   *  overlay owns the cursor), then drains the travel input.js piled up since
+   *  the last frame into the orbit: sensitivity scales both axes, invert-Y
+   *  flips only the pitch, and the pitch is clamped so the view never rolls
+   *  over. The drain happens BEFORE the fixed steps, so combat.aimHeading()
+   *  reading the orbit is current, never a frame stale. */
+  function updateLook() {
+    if (screen !== 'play') { input.look(); return; }
+    const d = input.look();
+    if (!d.x && !d.y) return;
+    if (!d.x && !d.y) return;
+    readLookSettings();
+    lookYaw -= d.x * LOOK_RATE * lookSens;
+    lookPitch = Math.max(LOOK_PITCH_MIN, Math.min(LOOK_PITCH_MAX,
+      lookPitch - d.y * LOOK_RATE * lookSens * lookInvert));
+    // The model idles with its shoulders facing the view and only breaks the
+    // turn when Rook actually moves, so he never pivots in place on the spot.
+    onFoot.onLook?.(lookYaw, looking);
+  }
+
+  /** Frame-rate independent orbit ease for the fixed steps: sec -> 0..1. */
+  function lookEase(sec) {
+    return 1 - Math.exp(-sec * 10);
+  }
+
   function frame(now) {
     requestAnimationFrame(frame);
     const frameTime = Math.min((now - last) / 1000, 0.1);
@@ -636,6 +738,8 @@ function boot() {
       accumulator = 0;
     }
     input.clear();
+    // Mouse-look runs on the display clock, before the render and HUD read it.
+    updateLook(frameTime);
     // Scene render + HUD refresh happen once per display frame.
     if (screen === 'menu') menuCamera(frameTime);
     update(STEP, state.clockMinutes);
@@ -713,7 +817,8 @@ function boot() {
 
     // The screenshot autopilot (shots.js) may pass a scripted snapshot so the
     // world plays forward without real keyboard/mouse events; a plain load
-    // reads the live input controller as usual.
+    // reads the live input controller as usual. The broadstep note above is
+    // kept next to the combat hand-off, which always steps this same dt.
     const snap = snapOverride || input.snapshot();
     onFoot.setWeapon(arsenal.current.id);
 
@@ -746,15 +851,26 @@ function boot() {
       }
       if (input.consumeAny(['KeyF'])) exitCar();
     } else {
-      followCamera(camera, dt, onFoot.getPosition(), onFoot.heading, city.colliders);
+      // On foot the follow camera takes the mouse-look orbit heading; the
+      // over-shoulder lean waits for the right button with a gun up. A plain
+      // unlocked mouse keeps the look where it is (input.js only turns it on
+      // a locked pointer), so a click that fires never whips the view.
+      const over = !!snap.mouseAim && combat.aiming;
+      looking = over && input.locked();
+      followCamera(camera, dt, onFoot.getPosition(), lookYaw, city.colliders,
+        { pitch: lookPitch, over, reset: !input.locked() });
+      onFoot.onLook?.(lookYaw, lookYawLast);
       onFoot.update(dt, snap, camera, combat.aimYaw, combat.aiming);
       traffic.update(dt, onFoot.getPosition(), 0);
       if (input.consumeAny(['KeyF'])) trySteal();
     }
 
     // Combat runs every step: ammo/reload, flashes, enemy AI and any hits.
-    // The screenshot autopilot's snapshot flows through so Rook can fire.
-    combat.update(dt, input, camera, snapOverride);
+    // The screenshot autopilot's snapshot flows through so Rook can fire; the
+    // live session also passes the mouse-look orbit as the aim (R3-8), which a
+    // staged capture omits so the scripted shots aim camera-forward as ever.
+    combat.update(dt, input, camera, snapOverride,
+      snapOverride ? null : { lookYaw, lookPitch, over: !!snap.mouseAim, locked: input.locked() });
 
     // Police: units drive at Rook, ram his car and — on foot, up close — bust
     // him. Rook's position and speed feed the chase; the result can shove the

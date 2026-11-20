@@ -127,15 +127,25 @@ export function buildPlayerMesh() {
 
 /** Third-person follow camera behind Rook, smoothed so it lags on turns.
  *  `colliders` (city.colliders, optional) enables occlusion pull-in so the
- *  camera never swings into a building block. */
-export function followCamera(camera, dt, pos, heading, colliders) {
+ *  camera never swings into a building block. `look` (R3-8, optional) is the
+ *  mouse-look orbit main.js owns: `{ pitch, yaw, over, reset }` — pitch lifts
+ *  the camera over Rook's shoulder up or down the street handy, over (right
+ *  button + a gun) pulls the shot in tight beside his shoulder, and reset (no
+ *  pointer lock) swings the orbit back behind him over a few frames. */
+export function followCamera(camera, dt, pos, heading, colliders, orbit) {
   // On-foot follow: measured hero frame-height at back=4.5/up=2.25 was ~45%
   // (too large) and at back=7.5 ~28% (still over). Pull back to ~9m and 2.5m
-  // up so Rook lands ~22-24% of frame height at FOV 55 — the GTA-style bar.
-  const back = 9.0;
-  const up = 2.5;
-  let cx = pos.x - Math.sin(heading) * back;
-  let cz = pos.z - Math.cos(heading) * back;
+  // up so Rook lands ~22-24% of frame height at FOV 55 — the cut-the-shoulder
+  // bar. Mouse-look keeps that pull through the pitch by lowering the height
+  // with cos(pitch); the over-shoulder aim comes in ~35% and pads right so the
+  // reticle stays clear of the body.
+  const lp = orbit ? orbit.pitch || 0 : 0;
+  const back = 9.0 * (orbit && orbit.over ? 0.88 : 1) * Math.cos(lp);
+  const up = 2.5 - Math.sin(lp) * 6.0;
+  const side = orbit && orbit.over ? 0.9 : 0;
+  if (orbit && orbit.reset && Math.abs(lp) > 0.002) orbit.pitch = lp * Math.max(0, 1 - dt * 6);
+  let cx = pos.x - Math.sin(heading) * back + Math.cos(heading) * side;
+  let cz = pos.z - Math.cos(heading) * back + Math.sin(heading) * side;
   let cy = pos.y + up;
   // Occlusion: cast from Rook's head to the desired camera spot against the
   // road-strip AABBs; where the segment leaves the road union, pull the

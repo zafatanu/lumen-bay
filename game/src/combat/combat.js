@@ -267,24 +267,22 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
   }
 
   /** Aim heading from the mouse-look orbit the follow camera shares (main.js).
-   *  On foot the muscle memory is never flipped: the game eases the orbit round
-   *  to `aimYaw + PI` every frame, so the crosshair still points exactly down
-   *  the camera. Over the shoulder (`aimPitch`, right button held) the aim
-   *  climbs with the camera for up or down street shots, clamped to a
-   *  readable pitch. Nothing under the pointer: camera forward (fallback).
+   *  The orbit is authoritative whenever main.js supplies one (locked OR free
+   *  cursor — the camera is the composition, so the crosshair never points off
+   *  its own axis): lookYaw is the camera's heading, and the camera looks AT
+   *  Rook, so the round leaves a step behind the camera the pre-look
+   *  centre-shot was. Pitch rides the orbit only over the shoulder. Pre-look
+   *  sessions (no lookYaw) and staged captures (opts omitted) keep camera
+   *  forward. main.js seeds the orbit before the fixed steps read it here.
    *  `opts` = { lookYaw, lookPitch, over, locked } from main.js. */
   function aimHeading(cameraIn, opts) {
     cameraIn.getWorldDirection(fwd);
     const fallback = Math.atan2(fwd.x, fwd.z);
     if (!opts || typeof opts.lookYaw !== 'number') return fallback;
-    let yaw = opts.lookYaw;
-    // Locked pointer: nothing moves the look but the mouse, so fold in the
-    // neck turn from WASD as well (the camera aim is the same in both cases).
-    if (opts.locked && typeof opts.neckYaw === 'number') yaw += opts.neckYaw * 0.5;
     aimPitch = opts.over
-      ? Math.max(-0.95, Math.min(0.95, (opts.lookPitch || 0) - 0.16))
+      ? Math.max(-0.95, Math.min(0.95, opts.lookPitch || 0))
       : 0;
-    return yaw + Math.PI;
+    return opts.lookYaw + Math.PI;
   }
 
   /** Muzzle world position: chest height, a hand's width to Rook's right
@@ -437,19 +435,28 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     const onFootFire = !state.inCar && !state.down;
     bring += ((held && snap.mouseAim) ? 1 - bring : -bring) * Math.min(1, dt * 12);
 
-    aimYaw = aimHeading(camera, snap.mouseX, snap.mouseY);
+    aimYaw = aimHeading(camera, opts);
     if (crosshair) {
       crosshair.style.display = (onFootFire && cur && !cur.melee) ? 'block' : 'none';
-      // Track the pointer every frame: the 24px box is centred by its -12px
-      // CSS margin, so left/top are the raw mouse coords (it used to sit
-      // pinned at 0,0 because nothing ever positioned it).
-      crosshair.style.left = `${snap.mouseX}px`;
-      crosshair.style.top = `${snap.mouseY}px`;
+      // Centre-screen, never on the body: the reticle IS the aim ray's
+      // origin, so it sits at the viewport's dead centre. main.js owns the
+      // hit-marker ring over it.
+    }
+
+    // Hit marker: a flesh hit flashes inside the ring, a kill ends it (main.js
+    // paints the ring from these flags; they decay on the real frame clock).
+    if (hitMarker > 0) {
+      hitMarker = Math.max(0, hitMarker - dt);
+      if (hitMarker === 0) hitKill = false;
     }
 
     if (onFootFire) {
+      // A locked-pointer session fires exactly once per button edge. The press
+      // that GAINED the lock only dismisses the "click to look" hint (main.js
+      // arms it spent), so it is never a stray round at the viewport centre.
+      const locked = !!(input && input.locked && input.locked());
       const wantFire = cur && !cur.melee
-        ? (cur.auto ? snap.mouseDown : input.click())
+        ? (cur.auto ? snap.mouseDown : (locked ? input.clickPressed() : input.click()))
         : input.click();
       if (wantFire) {
         if (cur && cur.melee) meleeSwing();
@@ -476,6 +483,10 @@ export function createCombat(scene, state, arsenal, enemies, playerPos, opts = {
     /** One forced muzzle flash at the current aim point (staged captures). */
     flashMuzzle() { flashes.muzzle(muzzlePoint(), 1.2); },
     get aimYaw() { return aimYaw; },
+    /** Hit marker for the HUD (hud.js): seconds left of the flesh-hit flash
+     *  and whether that hit was a kill (red tick) or a wound (white tick). */
+    get hitMarker() { return hitMarker; },
+    get hitKill() { return hitKill; },
     get hurt() { return hurtFlash; },
     get aiming() { return !!(arsenal.current && !arsenal.current.melee); },
   };

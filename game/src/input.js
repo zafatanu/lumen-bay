@@ -12,9 +12,11 @@
 //   in a car driving.js reads it as nitro.
 //
 // Mouse: the canvas click locks the pointer (mouse-look, see main.js). While
-// locked, left button fires and right held aims over the shoulder — exactly the
-// bindings CONTROLS lists. Unlocked, left click still fires and right held still
-// aims (a plain mouse works without the lock); the lock only adds camera orbit.
+// locked, left button fires (once per press), right held aims over the shoulder
+// and the mouse turns the camera — exactly the bindings CONTROLS lists. Without
+// the lock the look travel is ignored (a free cursor would otherwise whip the
+// camera on every menu trip); there the pointer-contact aim still picks the
+// heading (combat.aimHeading's camera-forward fallback).
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),
@@ -26,7 +28,7 @@ const WASD = {
 // Digit keys select weapons (1-4); kept as a tiny state alongside the rest.
 const DIGIT = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
 
-export function createInput() {
+export function createInput(inputCanvasIn) {
   const keys = {
     up: false, down: false, left: false, right: false,
     sprint: false, handbrake: false, jump: false,
@@ -42,6 +44,17 @@ export function createInput() {
   let lookX = 0;
   let lookY = 0;
   let clickSeen = false;
+  // A press is a shot, not a look, until the pointer travels: a plain click
+  // must never nudge the camera, only a drag/lock turn may.
+  let dragX = 0;
+  let dragY = 0;
+  let dragging = false;
+  // Locked-pointer presses: the click that GRABS the lock can never reach the
+  // fixed steps (the lock change lands after it), so it is armed-as-spent and
+  // only releases the hint; later presses are real rounds, eaten per edge.
+  let pressArmed = false;
+  // The play canvas (main.js hands it in): pointer-lock owner + lock lookup.
+  const inputCanvas = inputCanvasIn || document.getElementById('world3d');
 
   function onKeyDown(event) {
     const code = event.code;
@@ -82,6 +95,9 @@ export function createInput() {
   function onPointerDown(event) {
     mouse.x = event.clientX;
     mouse.y = event.clientY;
+    dragX = event.clientX;
+    dragY = event.clientY;
+    dragging = false;
     // Right / middle just aim: they must not queue a shot or hide a hint the
     // way a left press is allowed to.
     if (event.button === 2 || event.button === 1) { mouse.aim = true; return; }
@@ -94,6 +110,9 @@ export function createInput() {
   function onPointerUp(event) {
     if (event.button === undefined || event.button === 2 || event.button === 1) mouse.aim = false;
     if (event.button === undefined || event.button === 0) mouse.down = false;
+    dragging = false;
+    dragX = event.clientX;
+    dragY = event.clientY;
   }
 
   function onContextMenu(event) {
@@ -106,6 +125,10 @@ export function createInput() {
   // rAF, not just the newest one, so a fast flick orbits by its full travel
   // instead of the last few pixels.
   function onMouseMove(event) {
+    // Locked: the browser's movementX/Y is the true travel for the frame.
+    // Unlocked: only a LEFT-BUTTON DRAG steers — a plain mouse move, and the
+    // press that fires a round, feed the look nothing.
+    if (!document.pointerLockElement && !dragging) return;
     let dx = event.movementX || 0;
     let dy = event.movementY || 0;
     if (!dx && !dy && typeof event.getCoalescedEvents === 'function') {
@@ -173,22 +196,35 @@ export function createInput() {
       mouse.click = false;
       return c;
     },
-    /** Take the mouse-look travel since the last call and zero it. main.js
-     *  drains it once per rendered frame (after the fixed steps). */
+    /** Take the mouse-look travel since the last call; travel only
+     *  steers the camera while the pointer is locked; released, it is
+     *  dropped so the last few pixels of a drag never jump the view.
+     *  main.js drains it once per rendered frame (after the fixed steps). */
     look() {
-      const d = { x: lookX, y: lookY };
+      const d = document.pointerLockElement ? { x: lookX, y: lookY } : { x: 0, y: 0 };
       lookX = 0;
       lookY = 0;
       return d;
     },
-    /** A press-edge eat: under pointer lock every mousedown IS a shot, so
-     *  combat uses this for the gun — the press that hid the "click to look"
-     *  hint is already spent by then via the click() tap in combat.update.
-     *  click() keeps its "may be consumed twice" shape. */
+    /** True while a canvas owns the pointer (mouse-look is on). */
+    locked() {
+      const el = document.pointerLockElement;
+      return !!el && el === inputCanvas;
+    },
+    /** A press-edge eat for the gun under the lock. The click that grabbed the
+     *  lock was already spent (it dismissed the "click to look" hint), so every
+     *  press from here is a real round. */
     clickPressed() {
-      if (!clickSeen) return false;
-      clickSeen = false;
-      return true;
+      if (clickSeen) {
+        clickSeen = false;
+        pressArmed = false;
+        return true;
+      }
+      return false;
+    },
+    /** Begin a fresh armed round (the lock is on, nothing pressed yet). */
+    armPress() {
+      pressArmed = true;
     },
     clear() {
       pressed.clear();
