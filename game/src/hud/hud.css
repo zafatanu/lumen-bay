@@ -256,6 +256,59 @@
 
 /* --hud-css-footer-- marker: controls footer */
 
+/* R3-8 mouse-look: the aim ray is centre-screen (combat.js centreRay), so the
+   reticle is pinned to the viewport centre, never on the pointer. index.html's
+   inline #crosshair rule gives it a 24x24 box and a -12px margin (which
+   centres it on whatever left/top it has) but no position; this sets it.
+   #crosshair carries class="fullscreen", so a bare #crosshair (1 ID) LOSES to
+   index.html's `#hud > .fullscreen { inset: 0 }` (1 ID + 1 class) and the box
+   snaps to the top-left corner at left/top 0. The two-ID rule outranks that
+   inset; the three-class rule outranks its own `.hud-hidden .panel,
+   .hud-hidden #crosshair, ...` hiding selector (1 ID + 3 classes), so the
+   centre holds in play and off it while visibility does the hiding. */
+#hud #crosshair { left: 50%; top: 50%; }
+#hud.hud-hidden #crosshair { left: 50%; top: 50%; }
+
+/* Hit marker: the flash that sits over the crosshair when a round lands on
+   flesh. combat.js owns the timer (hitMarker seconds, hitKill for a kill);
+   hud.js reads it every frame and swaps this element's display/`kill`
+   class. Two crossed ticks, white for a wound, red for a kill. */
+[data-hud="hitmarker"] {
+  position: absolute; left: 50%; top: 50%; z-index: 2;
+  width: 26px; height: 26px; margin: -13px 0 0 -13px;
+  pointer-events: none; display: none;
+}
+[data-hud="hitmarker"]::before,
+[data-hud="hitmarker"]::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 3px; height: 26px; margin: -13px 0 0 -1.5px;
+  background: #ffffff; border-radius: 2px;
+  box-shadow: 0 0 6px rgba(255,255,255,0.9), 0 0 2px rgba(0,0,0,0.9);
+}
+[data-hud="hitmarker"]::before { transform: rotate(45deg); }
+[data-hud="hitmarker"]::after { transform: rotate(-45deg); }
+[data-hud="hitmarker"].kill::before,
+[data-hud="hitmarker"].kill::after {
+  background: #ff3a3a;
+  box-shadow: 0 0 8px rgba(255,58,58,0.95), 0 0 2px rgba(0,0,0,0.9);
+}
+
+/* Pointer-capture hint: play is mouse-look, but the browser hands the mouse
+   over only on a click the game can't fake. Visible until the pointer locks
+   (hud.js reads input.locked()); ESC releases it, so it comes back. */
+[data-hud="lock-hint"] {
+  position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%);
+  padding: 6px 14px; font-size: 12px; letter-spacing: 0.12em; white-space: nowrap;
+  color: #ffd9a0; background: rgba(8,12,20,0.72);
+  border: 1px solid rgba(255,217,160,0.45); border-radius: 6px;
+  pointer-events: none; display: none;
+}
+
+/* Hide the OS cursor over the view in play. Overlays (menu / pause / map) sit
+   above the canvas and set their own cursor. main.js also sets canvas
+   style.cursor per screen inline; this is belt-and-braces under it. */
+#world3d { cursor: none; }
+
 /* Ghosting fix (P9): main.js setScreen() toggles .hud-hidden on #hud whenever
    the screen is not 'play'. The menu/map/pause overlays are semi-transparent,
    so every HUD panel — plus the crosshair and score popups — is hidden under
@@ -266,6 +319,8 @@
 #hud.hud-hidden .panel,
 #hud.hud-hidden .hud-footer,
 #hud.hud-hidden #crosshair,
+#hud.hud-hidden [data-hud="hitmarker"],
+#hud.hud-hidden [data-hud="lock-hint"],
 #hud.hud-hidden #popups {
   visibility: hidden;
 }

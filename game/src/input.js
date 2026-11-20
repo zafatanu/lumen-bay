@@ -50,8 +50,8 @@ export function createInput(inputCanvasIn) {
   let dragY = 0;
   let dragging = false;
   // Locked-pointer presses: the click that GRABS the lock can never reach the
-  // fixed steps (the lock change lands after it), so it is armed-as-spent and
-  // only releases the hint; later presses are real rounds, eaten per edge.
+  // fixed steps (the lock change lands after it), so the lock transition eats
+  // its edge below; later presses are real rounds, eaten per edge.
   let pressArmed = false;
   // The play canvas (main.js hands it in): pointer-lock owner + lock lookup.
   const inputCanvas = inputCanvasIn || document.getElementById('world3d');
@@ -149,6 +149,19 @@ export function createInput(inputCanvasIn) {
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('contextmenu', onContextMenu);
 
+  // The press that takes the lock is spent: it only claims the mouse. Taking
+  // the edge here (whenever the lock arrives while a press edge is pending)
+  // means it can never fire a round — not on the next step, and not later
+  // once a gun is drawn over the fists that took it wholesale. Later presses
+  // fall outside this window and are real rounds, eaten per edge.
+  function onPointerLockChange() {
+    if (document.pointerLockElement && clickSeen) {
+      clickSeen = false;
+      mouse.click = false;
+    }
+  }
+  document.addEventListener('pointerlockchange', onPointerLockChange);
+
   // On window blur (switching tabs, clicking out) release every held key so a
   // stale "up" can't leave Rook driving into a wall or firing unattended.
   window.addEventListener('blur', () => {
@@ -191,9 +204,14 @@ export function createInput(inputCanvasIn) {
       }
       return false;
     },
+    /** The plain press queue (unlocked), and the pending press edge itself: a
+     *  locked non-auto gun reads THIS, and consumes it with clickPressed(). The
+     *  melee branch reads click() alone but still burns the edge here, so a
+     *  swing can never be replayed as a gun round. */
     click() {
       const c = mouse.click;
       mouse.click = false;
+      clickSeen = false;
       return c;
     },
     /** Take the mouse-look travel since the last call; travel only

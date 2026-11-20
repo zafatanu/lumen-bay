@@ -26,6 +26,13 @@ export function createHud(state, dom, opts = {}) {
   // in catalog SHELLS order); empty if absent. The minimap plots the real
   // catalog coordinates and skips the handles flagged taken.
   const getShells = opts.getShells || (() => []);
+  // Live flesh-hit flash from combat.js ({t, kill}): t is seconds left of the
+  // flash, kill picks the red tick. Absent provider = no marker. Same
+  // late-binding rule as getMarkers.
+  const getHitMarker = opts.getHitMarker || (() => ({ t: 0, kill: false }));
+  // Live pointer-lock state from main.js (input.locked()); true = look is on
+  // and the "click to look" hint steps aside. Same late-binding rule.
+  const getLocked = opts.getLocked || (() => false);
   // Accumulated display time for the pulsing story-marker blip.
   let hudTime = 0;
 
@@ -63,6 +70,26 @@ export function createHud(state, dom, opts = {}) {
   const radioStation = $('[data-hud="radio-station"]');
   const radioTrack = $('[data-hud="radio-track"]');
   const popupsEl = $('[data-hud="popups"]');
+
+  // ---- Hit marker + look-lock hint (R3-8 mouse-look) ----------------------
+  // The crosshair sits at the dead centre of the view; both of these badges
+  // sit with it. Nothing in index.html builds them, so hud.js does, and
+  // hud.css positions them (over #crosshair).
+  let hitMarkerEl = $('[data-hud="hitmarker"]');
+  if (!hitMarkerEl) {
+    hitMarkerEl = document.createElement('div');
+    hitMarkerEl.setAttribute('data-hud', 'hitmarker');
+    dom.appendChild(hitMarkerEl);
+  }
+  // "Click to lock mouse - ESC to release": shown only in play, only while the
+  // pointer is free - once locked the mouse owns the view.
+  let lockHintEl = $('[data-hud="lock-hint"]');
+  if (!lockHintEl) {
+    lockHintEl = document.createElement('div');
+    lockHintEl.setAttribute('data-hud', 'lock-hint');
+    lockHintEl.textContent = 'Click to lock mouse \u2014 ESC to release';
+    dom.appendChild(lockHintEl);
+  }
 
   // ---- Crew chip row (P10) ------------------------------------------------
   // The three ACTIVE crew — Mama Luz (fixer), Tito (mechanic), Ivy (hacker):
@@ -460,6 +487,19 @@ export function createHud(state, dom, opts = {}) {
     }
   }
 
+  /** Centre crosshair overlays: the flesh-hit flash (white wound / red kill)
+   *  and the "mouse not captured yet" hint. Both read their live provider
+   *  every frame, so combat.js and the pointer-lock state are never cached. */
+  function updateReticle() {
+    if (hitMarkerEl) {
+      const hit = getHitMarker() || {};
+      const live = Number(hit.t) > 0;
+      hitMarkerEl.style.display = live ? 'block' : 'none';
+      hitMarkerEl.classList.toggle('kill', live && !!hit.kill);
+    }
+    if (lockHintEl) lockHintEl.style.display = getLocked() ? 'none' : 'block';
+  }
+
   // --hud-panels-3-- marker: all panels defined
 
   function update(dt) {
@@ -474,6 +514,7 @@ export function createHud(state, dom, opts = {}) {
     updateWeapons();
     updateRadio();
     updatePopups();
+    updateReticle();
   }
 
   return { update };

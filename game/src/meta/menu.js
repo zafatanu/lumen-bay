@@ -10,7 +10,7 @@ const SETTINGS_KEY = 'lumen-bay-settings';
 
 /** Load persisted settings; missing keys fall back to the game defaults. */
 export function loadSettings() {
-  const base = { volume: 1, music: true, minimap: true, shake: true };
+  const base = { volume: 1, music: true, minimap: true, shake: true, lookSens: 1, invertY: false };
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
     if (!raw) return base;
@@ -107,7 +107,7 @@ export function createMenu(state, callbacks = {}) {
       <div class="menu-logo">GENERATIONAL <span>AUTO</span></div>
       <div class="menu-tag">A sun-soaked island crime story</div>
       <div class="menu-judge">8 story missions \u00b7 traffic \u00b7 police chases \u00b7 radio \u00b7 saves</div>
-      <div class="menu-judge">WASD moves Rook once in game \u2014 here use arrows + Enter, choose NEW GAME</div>
+      <div class="menu-judge">Click a button to choose \u2014 mouse first, arrows + Enter still work</div>
       <div class="menu-buttons">
         <button data-mb="continue"${hasSave ? '' : ' disabled'}>CONTINUE${hasSave ? `<span class="mb-sub">${saveSummary}</span>` : ''}</button>
         <button data-mb="newgame">NEW GAME</button>
@@ -154,6 +154,16 @@ export function createMenu(state, callbacks = {}) {
 
   dom.querySelectorAll('button').forEach((b) => {
     if (b.dataset.mb !== 'newgame') b.addEventListener('click', () => fire(b.dataset.mb));
+  });
+
+  // Mouse-first menu: a quiet tick as the pointer crosses a button. Hover only
+  // - arrow-key focus moves must stay silent - and a disabled (CONTINUE with
+  // no save) button has nothing to announce, so it is skipped too.
+  buttons.forEach((b) => {
+    b.addEventListener('mouseenter', () => {
+      if (b.disabled) return;
+      sfx.play('click', { vol: 0.35 });
+    });
   });
 
   // NEW GAME must confirm if a save already exists.

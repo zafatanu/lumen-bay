@@ -108,6 +108,11 @@ function boot() {
     // minimap/map plot the real catalog spots and drop the taken ones.
     // Same late-binding pattern as getMarkers — shells is defined below.
     getShells: () => shells,
+    // Flesh-hit flash from combat.js (created below, after this HUD): only
+    // called from hud.update(), never at construction.
+    getHitMarker: () => ({ t: combat.hitMarker, kill: combat.hitKill }),
+    // Pointer-lock state for the "click to lock mouse" hint.
+    getLocked: () => input.locked(),
   });
 
   // Parked starter car: a Bay Runner beside spawn, just within steal reach
@@ -530,8 +535,9 @@ function boot() {
   }
   function hideSub() { subEl.style.display = 'none'; }
 
-  /** Settings panel: volume slider + music/minimap/shake toggles. Changes are
-   *  applied live and persisted under lumen-bay-settings. */
+  /** Settings panel: volume and mouse-sensitivity sliders + music / minimap
+   *  / shake / invert-Y toggles. Changes are applied live and persisted under
+   *  lumen-bay-settings. */
   function openSettings() {
     const s = state.settings;
     showSub('SETTINGS', `
@@ -540,9 +546,18 @@ function boot() {
       <div class="set-row"><span>MUSIC</span><input type="checkbox" data-set="music" ${s.music ? 'checked' : ''}></div>
       <div class="set-row"><span>MINIMAP</span><input type="checkbox" data-set="minimap" ${s.minimap !== false ? 'checked' : ''}></div>
       <div class="set-row"><span>SCREEN SHAKE</span><input type="checkbox" data-set="shake" ${s.shake !== false ? 'checked' : ''}></div>
+      <div class="set-row"><span>MOUSE SENSITIVITY</span>
+        <input type="range" min="40" max="260" value="${Math.round((s.lookSens || 1) * 100)}" data-set="lookSens"></div>
+      <div class="set-row"><span>INVERT Y</span><input type="checkbox" data-set="invertY" ${s.invertY ? 'checked' : ''}></div>
     `);
     subEl.querySelector('[data-set="volume"]').addEventListener('input', (e) => {
       s.volume = Number(e.target.value) / 100;
+      saveSettings(state.settings);
+      applySettings();
+    });
+    // Mouse-look is read live by readLookSettings() every frame; persist here.
+    subEl.querySelector('[data-set="lookSens"]').addEventListener('input', (e) => {
+      s.lookSens = Number(e.target.value) / 100;
       saveSettings(state.settings);
       applySettings();
     });
@@ -610,8 +625,8 @@ function boot() {
     menuClose && menuClose();
     menuClose = createMenu(state, menuCallbacks());
   }
-  /** Click the view to take the mouse. The click that takes the lock is spent
-   *  by input.js's armed round, so it never fires a shot at the centre. */
+  /** Press the view to take the mouse. The press that takes the lock is spent
+   *  by input.js (eaten before it queues a shot), so it never fires a round. */
   /** Swap the OS cursor style for the active screen: hidden over the view in
    *  play with no lock (the crosshair is the pointer), a crosshair under the
    *  lock, and the normal arrow wherever an overlay owns the mouse. */
@@ -627,14 +642,20 @@ function boot() {
 
   document.addEventListener('pointerlockchange', onLockChange);
 
-  function onCanvasClick() {
+  /** Take the lock on a canvas PRESS (left button only), not on the click that
+   *  follows it: this target-phase listener runs before input.js's window
+   *  listener sees the same press, so input.js knows the press that is about
+   *  to take the lock is the grab, never a shot — it can't reach a combat step
+   *  that runs before the lock change (the re-lock stray round). */
+  function onCanvasPointerDown(event) {
     if (screen !== 'play' || input.locked()) return;
+    if (event.button !== undefined && event.button !== 0) return;
     try {
       const p = canvas.requestPointerLock();
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch { /* pointer lock declining is a non-event */ }
   }
-  canvas.addEventListener('click', onCanvasClick);
+  canvas.addEventListener('pointerdown', onCanvasPointerDown);
 
   function menuCallbacks() {
     return {
