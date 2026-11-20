@@ -179,17 +179,17 @@ function boot() {
   const beacon = new THREE.Group();
   {
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.16, 22, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffd19a, transparent: true, opacity: 0.75 })
+      new THREE.CylinderGeometry(0.14, 0.34, 46, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffc24a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false })
     );
-    pillar.position.y = 8;
+    pillar.position.y = 15;
     beacon.add(pillar);
     const diamond = new THREE.Mesh(
-      new THREE.ConeGeometry(0.7, 1.2, 4),
-      new THREE.MeshBasicMaterial({ color: 0x2ae0c0, transparent: true, opacity: 0.9 })
+      new THREE.ConeGeometry(1.6, 2.8, 4),
+      new THREE.MeshBasicMaterial({ color: 0x2ae0c0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false })
     );
     diamond.rotation.y = Math.PI / 4;
-    diamond.position.y = 17;
+    diamond.position.y = 37;
     beacon.add(diamond);
     beacon.visible = false;
     scene.add(beacon);
@@ -786,11 +786,21 @@ function boot() {
     return enemies.spawnEnemy(kind, pos, opts);
   }
 
-  // Keep the floating objective beacon on the current mission target.
+  // Keep the floating objective beacon on the current mission target. In free
+  // roam (no active job) it homes on the first unlocked story mission's first
+  // stage target, so a fresh spawn always has the gold beacon ahead — close
+  // and dead-in-frame, exactly the direction newGame faces Rook toward.
   function updateBeacon() {
     const t = state.missionTarget || state.sideJobTarget;
-    if (!t) { beacon.visible = false; return; }
-    beacon.position.set(t.x, 0, t.z);
+    if (t) { beacon.position.set(t.x, 0, t.z); beacon.visible = true; return; }
+    const active = (state.missions || []).find((mi) => mi.status === 'ACTIVE');
+    const def = active && missionCatalog.find((m) => m.id === active.id);
+    const stage = def && def.stages && def.stages[0];
+    const ft = stage && stage.target;
+    if (!ft) { beacon.visible = false; return; }
+    const pos = typeof ft === 'object' ? ft : (missionMarkers.find((m) => m.label === ft) || {}).pos;
+    if (!pos) { beacon.visible = false; return; }
+    beacon.position.set(pos.x, 0, pos.z);
     beacon.visible = true;
   }
 
