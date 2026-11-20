@@ -110,12 +110,13 @@ function boot() {
     getShells: () => shells,
   });
 
-  // Parked starter car: a Bay Runner on the Coral Beach boulevard beside spawn.
+  // Parked starter car: a Bay Runner beside spawn, just within steal reach
+  // (2.83 m from Rook's spawn) so a fresh player can press F at spawn and drive.
   const bayRunner = CARS.find((c) => c.name === 'Bay Runner') || CARS[1];
   let parked = null;
   {
     const mesh = buildCarMesh(bayRunner);
-    const p = new THREE.Vector3(spawn.x + 6, 0, spawn.z + 12);
+    const p = new THREE.Vector3(spawn.x + 2, 0, spawn.z + 8);
     mesh.position.copy(p);
     scene.add(mesh);
     parked = { mesh, def: bayRunner, pos: p };
