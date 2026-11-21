@@ -11,12 +11,13 @@
 //   `jump` is the held Space field — on foot it jumps (see onfoot.js), and
 //   in a car driving.js reads it as nitro.
 //
-// Mouse: the canvas click locks the pointer (mouse-look, see main.js). While
-// locked, left button fires (once per press), right held aims over the shoulder
-// and the mouse turns the camera — exactly the bindings CONTROLS lists. Without
-// the lock the look travel is ignored (a free cursor would otherwise whip the
-// camera on every menu trip); there the pointer-contact aim still picks the
-// heading (combat.aimHeading's camera-forward fallback).
+// Mouse: the canvas press locks the pointer (mouse-look, see main.js) and that
+// grab never fires — a second click drops the lock, so re-locking takes a new
+// press. While locked, left button fires (once per press), right held aims over
+// the shoulder and the mouse turns the camera — exactly the bindings CONTROLS
+// lists. Without the lock the look travel is ignored (a free cursor would
+// otherwise whip the camera on every menu trip); there the pointer-contact aim
+// still picks the heading (combat.aimHeading's camera-forward fallback).
 
 const WASD = {
   up: new Set(['KeyW', 'ArrowUp']),
@@ -43,16 +44,19 @@ export function createInput(inputCanvasIn) {
   // the click that HIDES the hint never also fires a round.
   let lookX = 0;
   let lookY = 0;
+  // Locked-pointer presses: this flag is the queued press EDGE (one per press,
+  // fired by combat, cleared by click()); a press that starts unlocked queues
+  // none in onPointerDown, so nothing can go stale into the first locked press.
   let clickSeen = false;
+  // The grab: true from the press that TOOK the lock until that same press is
+  // released. While it holds, a locked press is that grab (it never queues the
+  // next edge); the first press STARTED under the lock is the real round.
+  let lockHeld = false;
   // A press is a shot, not a look, until the pointer travels: a plain click
   // must never nudge the camera, only a drag/lock turn may.
   let dragX = 0;
   let dragY = 0;
   let dragging = false;
-  // Locked-pointer presses: the click that GRABS the lock can never reach the
-  // fixed steps (the lock change lands after it), so the lock transition eats
-  // its edge below; later presses are real rounds, eaten per edge.
-  let pressArmed = false;
   // The play canvas (main.js hands it in): pointer-lock owner + lock lookup.
   const inputCanvas = inputCanvasIn || document.getElementById('world3d');
 
@@ -103,13 +107,26 @@ export function createInput(inputCanvasIn) {
     if (event.button === 2 || event.button === 1) { mouse.aim = true; return; }
     if (event.button !== undefined && event.button !== 0) return;
     mouse.down = true;
+    // Grabs stay off the trigger: the press that asks for the lock (unlocked)
+    // queues no edge itself, and the lock landing on it can queue none either —
+    // the first edge only comes from a press made while the pointer is locked
+    // and no grab still holds it. That first locked press hands the lock back
+    // to the browser (the toggle gesture would otherwise shoot on re-acquire),
+    // and its own edge fires one round; the next lock gets a clean press.
+    const grab = !document.pointerLockElement || lockHeld;
+    if (grab) { lockHeld = true; return; }
     mouse.click = true;
     clickSeen = true;
   }
 
   function onPointerUp(event) {
     if (event.button === undefined || event.button === 2 || event.button === 1) mouse.aim = false;
-    if (event.button === undefined || event.button === 0) mouse.down = false;
+    if (event.button === undefined || event.button === 0) {
+      mouse.down = false;
+      // The grab hold lives and dies with its press: the release that follows
+      // hands the lock back, and the next locked press is a fresh round.
+      lockHeld = false;
+    }
     dragging = false;
     dragX = event.clientX;
     dragY = event.clientY;
@@ -149,15 +166,19 @@ export function createInput(inputCanvasIn) {
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('contextmenu', onContextMenu);
 
-  // The press that takes the lock is spent: it only claims the mouse. Taking
-  // the edge here (whenever the lock arrives while a press edge is pending)
-  // means it can never fire a round — not on the next step, and not later
-  // once a gun is drawn over the fists that took it wholesale. Later presses
-  // fall outside this window and are real rounds, eaten per edge.
+  // A press that took the lock in onPointerDown already holds the grab. A lock
+  // change from a press that started unlocked is either that grab landing after
+  // the press (main.js never arms it for that grab) — no edge was queued
+  // then, so any edge pending here is a real locked press and the hold lifts —
+  // or a stray enter-decision landing in a later task: by then the press has
+  // released (hold lifted), so its edge is the grab's and is dropped, the hold
+  // standing so the next press is still the first round.
   function onPointerLockChange() {
-    if (document.pointerLockElement && clickSeen) {
+    if (!document.pointerLockElement) return;
+    if (clickSeen) {
       clickSeen = false;
       mouse.click = false;
+      lockHeld = true;
     }
   }
   document.addEventListener('pointerlockchange', onPointerLockChange);
@@ -229,20 +250,16 @@ export function createInput(inputCanvasIn) {
       const el = document.pointerLockElement;
       return !!el && el === inputCanvas;
     },
-    /** A press-edge eat for the gun under the lock. The click that grabbed the
-     *  lock was already spent (it dismissed the "click to look" hint), so every
-     *  press from here is a real round. */
+    /** A press-edge eat for the gun under the lock: the edge a locked press
+     *  queued in onPointerDown. An unlocked press queues none, so this is false
+     *  until the pointer locks — and true for the FIRST press after it locks. */
     clickPressed() {
+      if (!document.pointerLockElement) return false;
       if (clickSeen) {
         clickSeen = false;
-        pressArmed = false;
         return true;
       }
       return false;
-    },
-    /** Begin a fresh armed round (the lock is on, nothing pressed yet). */
-    armPress() {
-      pressArmed = true;
     },
     clear() {
       pressed.clear();

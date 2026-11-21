@@ -637,16 +637,16 @@ function boot() {
   function onLockChange() {
     const locked = input.locked();
     setCursorMode(screen === 'play' ? (locked ? 'cross' : 'hidden') : 'default');
-    if (!locked) input.armPress();
   }
 
   document.addEventListener('pointerlockchange', onLockChange);
 
-  /** Take the lock on a canvas PRESS (left button only), not on the click that
-   *  follows it: this target-phase listener runs before input.js's window
-   *  listener sees the same press, so input.js knows the press that is about
-   *  to take the lock is the grab, never a shot — it can't reach a combat step
-   *  that runs before the lock change (the re-lock stray round). */
+  /** Take the lock on a canvas PRESS (left button only) and never on a click:
+   *  a locked canvas is fullscreened by ESC, so a locked press cannot be the
+   *  pointer-locked click the browser would use to drop it — it is a shot. This
+   *  handler and input.js's window press listener both exist before any lock;
+   *  an unlocked press's window listener runs before this one, and input.js
+   *  queues its edge only if the pointer was already locked (see onPointerDown). */
   function onCanvasPointerDown(event) {
     if (screen !== 'play' || input.locked()) return;
     if (event.button !== undefined && event.button !== 0) return;
